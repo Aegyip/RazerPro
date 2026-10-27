@@ -52,6 +52,16 @@ internal static class Cli
                     return 0;
                 case "--endpoint-enable" when args.Length > 2:
                     return EndpointEnable(args[1], args[2] != "off");
+                case "--set-default" when args.Length > 1:
+                    // Same notification as a pick in the taskbar's output list; "media" leaves
+                    // communications where it is, as some pickers do.
+                    if (CoreAudio.FindEndpoint(DataFlow.Render, args[1]) is not { } pick)
+                        return 1;
+                    if (args.Contains("media"))
+                        CoreAudio.SetDefaultEndpoint(pick, Role.Console, Role.Multimedia);
+                    else
+                        CoreAudio.SetDefaultEndpoint(pick);
+                    return 0;
                 case "--sessions":
                     return Sessions(args.Length > 1 && int.TryParse(args[1], out var sessionSeconds) ? sessionSeconds : 5);
                 case "--meters":
@@ -235,17 +245,16 @@ internal static class Cli
         return matches.Count > 0 ? 0 : 1;
     }
 
-    /// <summary>Switches VB-CABLE's input to 7.1, then hides the cable again as the app does while 7.1 is off.</summary>
+    /// <summary>Enables and renames VB-CABLE's devices and switches its input to 7.1; used by the installer.</summary>
     static int ConfigureCable()
     {
-        if (SurroundController.ShowCable(true).Render is not { } cable)
+        if (SurroundController.PrepareCable().Render is not { } cable)
         {
             Console.WriteLine("VB-CABLE not installed");
             return 1;
         }
         var ok = SurroundController.EnsureSevenOne(cable);
         Console.WriteLine(ok ? $"{SurroundController.SurroundDeviceName}: {CoreAudio.MixFormat(cable)}" : "Could not switch the cable to 7.1");
-        SurroundController.ShowCable(false);
         return ok ? 0 : 1;
     }
 
@@ -412,7 +421,7 @@ internal static class Cli
 
     static int Surround(int seconds, string profile, bool exclusive, bool withTone)
     {
-        var (cable, source) = SurroundController.ShowCable(true);
+        var (cable, source) = SurroundController.PrepareCable();
         var target = CoreAudio.FindEndpoint(DataFlow.Render, SurroundController.HeadsetName);
         if (source is null || target is null)
         {

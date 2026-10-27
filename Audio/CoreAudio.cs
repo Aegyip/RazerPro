@@ -210,15 +210,14 @@ internal static class CoreAudio
         return (IAudioClient3)device.Activate(ref iid, ClsctxAll, IntPtr.Zero);
     }
 
-    /// <summary>Makes the device the default for every role, communications (voice chat) included.</summary>
-    public static void SetDefaultEndpoint(string deviceId)
+    /// <summary>Makes the device the default for every role (communications/voice chat included), or only the given ones.</summary>
+    public static void SetDefaultEndpoint(string deviceId, params Role[] roles)
     {
         var policy = (IPolicyConfig)new PolicyConfigComObject();
         try
         {
-            policy.SetDefaultEndpoint(deviceId, Role.Console);
-            policy.SetDefaultEndpoint(deviceId, Role.Multimedia);
-            policy.SetDefaultEndpoint(deviceId, Role.Communications);
+            foreach (var role in roles.Length > 0 ? roles : [Role.Console, Role.Multimedia, Role.Communications])
+                policy.SetDefaultEndpoint(deviceId, role);
         }
         finally
         {
@@ -257,8 +256,47 @@ internal interface IMMDeviceEnumerator
     IMMDeviceCollection EnumAudioEndpoints(DataFlow dataFlow, uint stateMask);
     IMMDevice GetDefaultAudioEndpoint(DataFlow dataFlow, Role role);
     IMMDevice GetDevice([MarshalAs(UnmanagedType.LPWStr)] string id);
-    void RegisterEndpointNotificationCallback(IntPtr client);
-    void UnregisterEndpointNotificationCallback(IntPtr client);
+    void RegisterEndpointNotificationCallback(IMMNotificationClient client);
+    void UnregisterEndpointNotificationCallback(IMMNotificationClient client);
+}
+
+[ComImport, Guid("7991EEC9-7E89-4D85-8390-6C703CEC60C0"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+internal interface IMMNotificationClient
+{
+    void OnDeviceStateChanged([MarshalAs(UnmanagedType.LPWStr)] string deviceId, uint newState);
+    void OnDeviceAdded([MarshalAs(UnmanagedType.LPWStr)] string deviceId);
+    void OnDeviceRemoved([MarshalAs(UnmanagedType.LPWStr)] string deviceId);
+    void OnDefaultDeviceChanged(DataFlow flow, Role role, [MarshalAs(UnmanagedType.LPWStr)] string? defaultDeviceId);
+    void OnPropertyValueChanged([MarshalAs(UnmanagedType.LPWStr)] string deviceId, PropertyKey key);
+}
+
+/// <summary>Reports changes of the default playback device, e.g. a pick in the taskbar's output list.</summary>
+internal sealed class DefaultDeviceWatcher : IMMNotificationClient, IDisposable
+{
+    readonly IMMDeviceEnumerator _enumerator = CoreAudio.CreateEnumerator();
+
+    /// <summary>Raised on a COM thread with the new default playback device (multimedia role).</summary>
+    public event Action<string>? DefaultPlaybackChanged;
+
+    public DefaultDeviceWatcher() => _enumerator.RegisterEndpointNotificationCallback(this);
+
+    public void Dispose()
+    {
+        _enumerator.UnregisterEndpointNotificationCallback(this);
+        Marshal.ReleaseComObject(_enumerator);
+    }
+
+    // Each pick fires once per role; the multimedia one alone stands for it.
+    public void OnDefaultDeviceChanged(DataFlow flow, Role role, string? defaultDeviceId)
+    {
+        if (flow == DataFlow.Render && role == Role.Multimedia && defaultDeviceId is not null)
+            DefaultPlaybackChanged?.Invoke(defaultDeviceId);
+    }
+
+    public void OnDeviceStateChanged(string deviceId, uint newState) { }
+    public void OnDeviceAdded(string deviceId) { }
+    public void OnDeviceRemoved(string deviceId) { }
+    public void OnPropertyValueChanged(string deviceId, PropertyKey key) { }
 }
 
 [ComImport, Guid("0BD7A1BE-7A1A-44DB-8397-CC5392387B5E"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]

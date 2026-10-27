@@ -3,8 +3,9 @@ namespace BarracudaTray.Audio;
 /// <summary>
 /// Turns virtual 7.1 on and off from the UI thread: makes VB-CABLE the default playback device so
 /// games send their 7.1 mix there, runs the <see cref="SurroundEngine"/>, and hands the default back
-/// to the headset when switched off or on exit (otherwise the PC would go silent). While 7.1 is off
-/// the VB-CABLE devices are disabled so they stay out of Windows' device lists.
+/// to the headset when switched off or on exit (otherwise the PC would go silent).
+/// The cable stays enabled the whole time, renamed to "Barracuda 7.1": enabling it on demand made
+/// apps such as Discord treat every switch-on as a newly plugged device and offer to move to it.
 /// The communications role (Discord and other voice apps) moves to VB-CABLE too: with the headset
 /// held exclusively, anything still playing to it directly would be silent.
 /// </summary>
@@ -14,6 +15,9 @@ internal sealed class SurroundController : IDisposable
 
     /// <summary>What VB-CABLE's input is renamed to, so the output picker shows something meaningful.</summary>
     public const string SurroundDeviceName = "Barracuda 7.1";
+
+    /// <summary>What VB-CABLE's output is renamed to; it only feeds the engine and is never a microphone.</summary>
+    const string EngineSourceName = "Barracuda 7.1 (motor)";
 
     // VB-CABLE's endpoints are found by their device ("VB-Audio Virtual Cable") and their own name.
     // Its naming is from the cable's point of view: games play into "CABLE Input" (a playback
@@ -41,6 +45,28 @@ internal sealed class SurroundController : IDisposable
             _retry.Stop();
             Restart();
         };
+        CableId = PrepareCable().Render;
+    }
+
+    /// <summary>The cable's playback endpoint ("Barracuda 7.1"), if VB-CABLE is installed.</summary>
+    public string? CableId { get; private set; }
+
+    /// <summary>
+    /// The user picked another playback device while 7.1 was on. Switching 7.1 off must keep their
+    /// pick instead of handing the default back to the headset, and the pick has to cover every
+    /// role: the taskbar's list may leave communications on the cable, where Discord would go silent.
+    /// </summary>
+    public void HandOffDefault(string deviceId)
+    {
+        _ownsDefault = false;
+        try
+        {
+            CoreAudio.SetDefaultEndpoint(deviceId);
+        }
+        catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException or InvalidCastException or UnauthorizedAccessException)
+        {
+            AppLog.Write($"Varsayılan cihaz tüm rollere taşınamadı: {ex.Message}");
+        }
     }
 
     public bool IsRunning => _engine is not null;
@@ -61,24 +87,14 @@ internal sealed class SurroundController : IDisposable
         _retry.Dispose();
         StopEngine();
         RestoreDefault();
-        ShowCable(false);
-    }
-
-    /// <summary>VB-CABLE's input and output if they are currently enabled; changes nothing.</summary>
-    public static (string? Render, string? Capture) FindCable()
-    {
-        var render = CoreAudio.AllEndpoints(DataFlow.Render)
-            .FirstOrDefault(e => e.Active && e.Interface.Contains(CableInterface) && e.Description is CableInputName or SurroundDeviceName);
-        var capture = CoreAudio.AllEndpoints(DataFlow.Capture)
-            .FirstOrDefault(e => e.Active && e.Interface.Contains(CableInterface) && e.Description == CableOutputName);
-        return (render.Id, capture.Id);
     }
 
     /// <summary>
-    /// Enables (or disables) VB-CABLE's input and output and returns their ids; extra VB-CABLE
-    /// endpoints are always disabled. The input is renamed the first time it is shown.
+    /// Makes sure VB-CABLE's input and output are enabled and carry our names, disables any other
+    /// VB-CABLE endpoint, and returns the two ids. Only changes what is not already so, so after the
+    /// first run it touches nothing and apps see no device come or go.
     /// </summary>
-    public static (string? Render, string? Capture) ShowCable(bool show)
+    public static (string? Render, string? Capture) PrepareCable()
     {
         try
         {
@@ -89,27 +105,31 @@ internal sealed class SurroundController : IDisposable
                 if (ours)
                 {
                     render = e.Id;
-                    if (show && e.Description != SurroundDeviceName)
+                    if (e.Description != SurroundDeviceName)
                         CoreAudio.Rename(e.Id, SurroundDeviceName);
                 }
-                if (e.Active != (ours && show))
-                    CoreAudio.SetEnabled(e.Id, ours && show);
+                if (e.Active != ours)
+                    CoreAudio.SetEnabled(e.Id, ours);
             }
 
             string? capture = null;
             foreach (var e in CoreAudio.AllEndpoints(DataFlow.Capture).Where(e => e.Interface.Contains(CableInterface)))
             {
-                var ours = e.Description == CableOutputName;
+                var ours = e.Description is CableOutputName or EngineSourceName;
                 if (ours)
+                {
                     capture = e.Id;
-                if (e.Active != (ours && show))
-                    CoreAudio.SetEnabled(e.Id, ours && show);
+                    if (e.Description != EngineSourceName)
+                        CoreAudio.Rename(e.Id, EngineSourceName);
+                }
+                if (e.Active != ours)
+                    CoreAudio.SetEnabled(e.Id, ours);
             }
             return (render, capture);
         }
         catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException or InvalidCastException or UnauthorizedAccessException)
         {
-            AppLog.Write($"7.1: VB-CABLE cihazları {(show ? "açılamadı" : "gizlenemedi")}: {ex.Message}");
+            AppLog.Write($"7.1: VB-CABLE cihazları hazırlanamadı: {ex.Message}");
             return (null, null);
         }
     }
@@ -122,7 +142,6 @@ internal sealed class SurroundController : IDisposable
         if (!_wanted.Enabled)
         {
             RestoreDefault();
-            ShowCable(false);
             Changed?.Invoke();
             return;
         }
@@ -140,7 +159,8 @@ internal sealed class SurroundController : IDisposable
 
         try
         {
-            var (cableRender, cableCapture) = ShowCable(true);
+            var (cableRender, cableCapture) = PrepareCable();
+            CableId = cableRender;
             if (cableRender is null || cableCapture is null)
             {
                 Fail("VB-CABLE kurulu değil", retry: false);
@@ -209,10 +229,7 @@ internal sealed class SurroundController : IDisposable
         if (retry)
             _retry.Start();
         else
-        {
             RestoreDefault();
-            ShowCable(false);
-        }
         Changed?.Invoke();
     }
 

@@ -54,6 +54,7 @@ internal sealed class TrayApp : ApplicationContext
     readonly LightingEngine _engine;
     readonly HeadsetMonitor _headset = new();
     readonly SurroundController _surround;
+    readonly DefaultDeviceWatcher? _defaultWatcher;
     readonly GlobalHotkeys _hotkeys = new();
     readonly EventWaitHandle _exitRequest = new(false, EventResetMode.AutoReset, Program.ExitEventName);
     readonly RegisteredWaitHandle _exitWait;
@@ -165,7 +166,40 @@ internal sealed class TrayApp : ApplicationContext
         _engine = new LightingEngine(_settings.ToState());
         _headset.StatusChanged += _ => _ui.Post(_ => OnHeadsetChanged(), null);
         _surround.Apply(_settings.Surround, _settings.SurroundProfile, _settings.SurroundExclusive);
+
+        try
+        {
+            _defaultWatcher = new DefaultDeviceWatcher();
+            _defaultWatcher.DefaultPlaybackChanged += id => _ui.Post(_ => OnDefaultPlaybackChanged(id), null);
+        }
+        catch (COMException ex)
+        {
+            AppLog.Write($"Varsayılan cihaz izlenemiyor: {ex.Message}");
+        }
         SyncMenu();
+    }
+
+    /// <summary>
+    /// Picking "Barracuda 7.1" in Windows' output list turns 7.1 on; picking anything else while it
+    /// is on turns it off and keeps the user's pick. The app's own switches land here too, but by
+    /// then the setting already matches, so they change nothing.
+    /// </summary>
+    void OnDefaultPlaybackChanged(string deviceId)
+    {
+        if (_surround.CableId is not { } cable)
+            return;
+        var isCable = string.Equals(deviceId, cable, StringComparison.OrdinalIgnoreCase);
+        if (isCable && !_settings.Surround)
+        {
+            AppLog.Write("Listeden Barracuda 7.1 seçildi: 7.1 açılıyor");
+            ChangeSurround(s => s.Surround = true);
+        }
+        else if (!isCable && _settings.Surround)
+        {
+            AppLog.Write("Listeden başka bir ses cihazı seçildi: 7.1 kapanıyor");
+            _surround.HandOffDefault(deviceId);
+            ChangeSurround(s => s.Surround = false);
+        }
     }
 
     protected override void ExitThreadCore()
@@ -180,6 +214,8 @@ internal sealed class TrayApp : ApplicationContext
         {
             _exitWait.Unregister(null);
             _exitRequest.Dispose();
+            // Stopped first so handing the default back on exit is not taken for a user's pick.
+            _defaultWatcher?.Dispose();
             _hotkeys.Dispose();
             _surround.Dispose();
             _headset.Dispose();
