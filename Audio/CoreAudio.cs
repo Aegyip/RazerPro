@@ -79,6 +79,27 @@ internal static class CoreAudio
         }
     }
 
+    /// <summary>
+    /// Sets a playback device's format, as its Advanced tab would, so apps see that many channels.
+    /// Used to make VB-CABLE's input 7.1 without a trip to the Sound control panel.
+    /// </summary>
+    public static void SetDeviceFormat(string deviceId, AudioFormat endpointFormat, AudioFormat mixFormat)
+    {
+        var endpoint = endpointFormat.Allocate();
+        var mix = mixFormat.Allocate();
+        var policy = (IPolicyConfig)new PolicyConfigComObject();
+        try
+        {
+            policy.SetDeviceFormat(deviceId, endpoint, mix);
+        }
+        finally
+        {
+            Marshal.ReleaseComObject(policy);
+            Marshal.FreeHGlobal(endpoint);
+            Marshal.FreeHGlobal(mix);
+        }
+    }
+
     public static AudioFormat MixFormat(string deviceId)
     {
         var enumerator = CreateEnumerator();
@@ -285,7 +306,7 @@ internal interface IPolicyConfig
     void GetMixFormat();
     void GetDeviceFormat();
     void ResetDeviceFormat();
-    void SetDeviceFormat();
+    void SetDeviceFormat([MarshalAs(UnmanagedType.LPWStr)] string deviceId, IntPtr endpointFormat, IntPtr mixFormat);
     void GetProcessingPeriod();
     void SetProcessingPeriod();
     void GetShareMode();

@@ -55,6 +55,8 @@ internal sealed class TrayApp : ApplicationContext
     readonly HeadsetMonitor _headset = new();
     readonly SurroundController _surround;
     readonly GlobalHotkeys _hotkeys = new();
+    readonly EventWaitHandle _exitRequest = new(false, EventResetMode.AutoReset, Program.ExitEventName);
+    readonly RegisteredWaitHandle _exitWait;
     readonly NotifyIcon _tray;
     readonly SynchronizationContext _ui;
 
@@ -157,6 +159,9 @@ internal sealed class TrayApp : ApplicationContext
         RegisterHotkey(Keys.Control | Keys.Alt | Keys.S, _surroundEnabled, ToggleSurround);
         RegisterHotkey(Keys.Control | Keys.Alt | Keys.M, _micMute, ToggleMicMute);
 
+        _exitWait = ThreadPool.RegisterWaitForSingleObject(_exitRequest, (_, _) => _ui.Post(_ => ExitThread(), null),
+            null, Timeout.Infinite, executeOnlyOnce: true);
+
         _engine = new LightingEngine(_settings.ToState());
         _headset.StatusChanged += _ => _ui.Post(_ => OnHeadsetChanged(), null);
         _surround.Apply(_settings.Surround, _settings.SurroundProfile, _settings.SurroundExclusive);
@@ -173,6 +178,8 @@ internal sealed class TrayApp : ApplicationContext
     {
         if (disposing)
         {
+            _exitWait.Unregister(null);
+            _exitRequest.Dispose();
             _hotkeys.Dispose();
             _surround.Dispose();
             _headset.Dispose();

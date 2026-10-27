@@ -44,6 +44,8 @@ internal static class Cli
                     return Devices();
                 case "--status":
                     return Status();
+                case "--configure-cable":
+                    return ConfigureCable();
                 case "--meters":
                     return Meters(args.Length > 1 && int.TryParse(args[1], out var meterSeconds) ? meterSeconds : 5);
                 case "--selftest":
@@ -206,6 +208,19 @@ internal static class Cli
             }
         }
         return 0;
+    }
+
+    /// <summary>Switches VB-CABLE's input to 7.1; used by the installer.</summary>
+    static int ConfigureCable()
+    {
+        if (CoreAudio.FindEndpoint(DataFlow.Render, SurroundController.CableRenderName) is not { } cable)
+        {
+            Console.WriteLine("VB-CABLE not installed");
+            return 1;
+        }
+        var ok = SurroundController.EnsureSevenOne(cable);
+        Console.WriteLine(ok ? $"CABLE Input: {CoreAudio.MixFormat(cable)}" : "Could not switch CABLE Input to 7.1");
+        return ok ? 0 : 1;
     }
 
     /// <summary>Runs the headset monitor for a few seconds and prints what it learned.</summary>

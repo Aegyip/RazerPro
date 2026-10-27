@@ -2,6 +2,23 @@
 
 Razer Barracuda X Chroma için hafif bir Windows tray uygulaması. Razer Synapse, Razer Audio ve Razer 7.1 uygulamalarının yerine geçer.
 
+## Kurulum
+
+`build-installer.ps1` çalıştırılınca `dist\BarracudaTray-Kurulum.zip` oluşur (~130 KB). Zip'i açıp **Kur.cmd**'ye çift tıklamak yeterli; yönetici izni bir kez istenir ve gerisi kendiliğinden yapılır:
+
+| Adım | Ne yapılır | Ne zaman |
+|---|---|---|
+| .NET 10 Masaüstü Çalışma Zamanı | Microsoft'tan indirilip sessizce kurulur (~60 MB) | Yalnızca eksikse |
+| VB-CABLE | vb-audio.com'dan indirilir, VB-Audio'nun kendi kurulum penceresi açılır; orada **Install Driver**'a basılır | Yalnızca eksikse |
+| 7.1 profilleri | HeSuVi paketi SourceForge'dan indirilir, Windows'un `tar` aracıyla yalnızca `hrir` klasörü çıkarılır | Yalnızca eksikse |
+| Uygulama | `%LOCALAPPDATA%\Programs\BarracudaTray` klasörüne kopyalanır, Başlat menüsüne kısayol eklenir, Windows ile başlaması ayarlanır | Her kurulumda (güncelleme de böyle yapılır) |
+| CABLE Input | 7.1 (8 kanal) yapılır; sürücü yeni kurulduysa yeniden başlatmadan sonra uygulama bunu 7.1 açılınca kendisi yapar | Her kurulumda |
+| Razer yazılımları | Kuruluysa listelenir, istenirse Razer'ın kaldırıcısı açılır | Kuruluysa |
+
+VB-CABLE'ın lisansı, paketin başka bir yazılımın kurulumuna yazarın izni olmadan gömülmesine izin vermiyor. Bu yüzden kurulum VB-CABLE'ı sessizce kurmuyor, VB-Audio'nun kendi penceresini açıyor. Uygulamayı başkalarına dağıtacaksanız VB-Audio'dan izin alın. HeSuVi MIT lisanslıdır; profil dosyaları pakete konmaz, kurulumda resmi kaynaktan indirilir.
+
+Kaldırmak için **Kaldir.cmd**: uygulamayı düzgün kapatır (varsayılan ses cihazı kulaklığa döner), dosyaları, kısayolu ve başlangıç kaydını siler. VB-CABLE ve .NET başka programlarca da kullanılabildiği için yerinde bırakılır.
+
 ## Durum
 
 | Faz | İçerik | Durum |
@@ -54,7 +71,7 @@ oyun ─7.1─► CABLE Input ══ VB-CABLE ══► CABLE Output ─► moto
 - Gecikme için: 128 örneklik bölümlenmiş FFT konvolüsyonu (2,7 ms), iki kulak tek ters FFT'de; VB-CABLE'ın kayıt tarafı **özel modda** 8 kanal olarak en küçük periyotta okunur (Windows'taki kayıt formatı ayarı önemsizdir); kulaklığa da **özel modda** (Windows karıştırıcısını atlayarak) yazılır, olmazsa paylaşımlı moda düşülür; ara kuyruk küçük başlar ve yalnızca kesinti olursa büyür. Ölçülen: ~17,5 ms (3 ms okuma + 2,7 ms blok + ~9 ms kuyruk + 3 ms çıkış). Oyunun CABLE'a yazarkenki Windows gecikmesi (~10 ms) buna dahil değildir; o her sanal 7.1 çözümünde vardır.
 - Profiller `%APPDATA%\BarracudaTray\hrir` klasöründen okunur (HeSuVi 2.0.0.1 kurulum paketinin `hrir` klasörü, yalnızca 48 kHz dosyalar). Profil dosyaları depoya konmaz.
 
-Kurulum: [VB-CABLE](https://vb-audio.com/Cable/)'ı yönetici olarak kurup bilgisayarı yeniden başlatın, sonra Ses ayarları → Kayıttan yürütme → **CABLE Input** → Yapılandır → **7.1 Surround** seçin.
+VB-CABLE kurulduğunda Windows onu stereo olarak ayarlıyor. 7.1 açılınca uygulama **CABLE Input**'u kendisi 7.1 yapar (Ses ayarlarındaki "Gelişmiş" sekmesiyle aynı işlem), elle ayar gerekmez.
 
 ### Bilinen tuzaklar
 
@@ -90,6 +107,8 @@ BarracudaTray.exe --read 31         # bir feature report'u oku
 BarracudaTray.exe --listen 30       # kulaklığın gönderdiği raporları 30 sn yazdır
 BarracudaTray.exe --poll            # her input report'u bir kez iste
 BarracudaTray.exe --status          # kulaklık izleyicisinin okuduğu durum ve ayarlar
+BarracudaTray.exe --configure-cable # CABLE Input'u 7.1 yap
+BarracudaTray.exe --exit            # çalışan uygulamayı düzgün kapat
 BarracudaTray.exe --get 13          # vendor özelliği sor (yalnızca tablodakiler)
 BarracudaTray.exe --set 13 07       # vendor özelliği yaz (yalnızca tablodakiler)
 BarracudaTray.exe --devices         # ses cihazları, formatları ve özel modda desteklenenler

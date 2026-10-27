@@ -105,7 +105,7 @@ internal sealed class SurroundController : IDisposable
             _engine = engine;
             engine.Start();
 
-            if (CoreAudio.MixFormat(cableRender).Channels < 8)
+            if (!EnsureSevenOne(cableRender))
                 _problem = "Oyunlar şu an stereo gönderiyor: CABLE Input'u 7.1 yap (Ses → Yapılandır)";
         }
         catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException or InvalidCastException or ArgumentException or UnauthorizedAccessException)
@@ -114,6 +114,28 @@ internal sealed class SurroundController : IDisposable
             return;
         }
         Changed?.Invoke();
+    }
+
+    /// <summary>
+    /// Games only send 7.1 when the default device's mix format has eight channels. VB-CABLE
+    /// installs as stereo, so it is switched to 7.1 here instead of asking for the control panel.
+    /// </summary>
+    public static bool EnsureSevenOne(string cableRender)
+    {
+        if (CoreAudio.MixFormat(cableRender).Channels >= 8)
+            return true;
+        const uint SevenOne = 0x63F;
+        try
+        {
+            CoreAudio.SetDeviceFormat(cableRender,
+                new AudioFormat(8, HrirSet.SampleRate, 24, false, SevenOne),
+                new AudioFormat(8, HrirSet.SampleRate, 32, true, SevenOne));
+        }
+        catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException or ArgumentException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+        return CoreAudio.MixFormat(cableRender).Channels >= 8;
     }
 
     void Fail(string problem, bool retry)
