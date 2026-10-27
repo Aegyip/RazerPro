@@ -4,7 +4,7 @@ Razer Barracuda X Chroma için hafif bir Windows tray uygulaması. Razer Synapse
 
 ## Kurulum
 
-`build-installer.ps1` çalıştırılınca `dist\BarracudaTray-Kurulum.zip` oluşur (~130 KB). Zip'i açıp **Kur.cmd**'ye çift tıklamak yeterli; yönetici izni bir kez istenir ve gerisi kendiliğinden yapılır:
+`build-installer.ps1` çalıştırılınca `dist\BarracudaTray-Kurulum.zip` oluşur (~130 KB). Zip'i açıp **Kur.cmd**'ye çift tıklamak yeterli. Yönetici izni yalnızca .NET ya da VB-CABLE eksikse, onları kuran ayrı bir pencere için istenir; kullanıcıya ait her şey normal oturumda yapılır. Her çalışma `%TEMP%\BarracudaTray-kurulum.log` dosyasına yazılır. İndirmeler Windows'un `curl.exe` aracıyla yapılır (SourceForge, PowerShell'in indirme komutlarına dosya yerine HTML sayfası veriyor) ve dosya türü kontrol edilir.
 
 | Adım | Ne yapılır | Ne zaman |
 |---|---|---|
