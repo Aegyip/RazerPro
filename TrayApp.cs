@@ -72,7 +72,6 @@ internal sealed class TrayApp : ApplicationContext
     readonly ToolStripMenuItem _surroundMenu = new("7.1 Surround");
     readonly ToolStripMenuItem _surroundEnabled;
     readonly ToolStripMenuItem _surroundStatus = new() { Enabled = false };
-    readonly ToolStripMenuItem _surroundExclusive;
     readonly List<ToolStripMenuItem> _hrirItems = [];
 
     readonly ToolStripMenuItem _soundMenu = new("Kulaklık sesi");
@@ -110,8 +109,6 @@ internal sealed class TrayApp : ApplicationContext
         _surround = new SurroundController(_ui);
         _surround.Changed += SyncMenu;
         _surroundEnabled = new ToolStripMenuItem("Açık", null, (_, _) => ToggleSurround());
-        _surroundExclusive = new ToolStripMenuItem("Özel mod: en düşük gecikme (kulaklığa doğrudan çalanlar susar)", null,
-            (_, _) => ChangeSurround(s => s.SurroundExclusive = !s.SurroundExclusive));
         BuildSurroundMenu();
 
         _micMute = new ToolStripMenuItem("Mikrofonu sustur", null, (_, _) => ToggleMicMute());
@@ -165,7 +162,7 @@ internal sealed class TrayApp : ApplicationContext
 
         _engine = new LightingEngine(_settings.ToState());
         _headset.StatusChanged += _ => _ui.Post(_ => OnHeadsetChanged(), null);
-        _surround.Apply(_settings.Surround, _settings.SurroundProfile, _settings.SurroundExclusive);
+        _surround.Apply(_settings.Surround, _settings.SurroundProfile);
 
         try
         {
@@ -306,7 +303,6 @@ internal sealed class TrayApp : ApplicationContext
             }
             _surroundMenu.DropDownItems.Add(all);
         }
-        _surroundMenu.DropDownItems.AddRange([new ToolStripSeparator(), _surroundExclusive]);
     }
 
     void ToggleSurround() => ChangeSurround(s => s.Surround = !s.Surround);
@@ -315,7 +311,7 @@ internal sealed class TrayApp : ApplicationContext
     {
         change(_settings);
         _settings.Save();
-        _surround.Apply(_settings.Surround, _settings.SurroundProfile, _settings.SurroundExclusive);
+        _surround.Apply(_settings.Surround, _settings.SurroundProfile);
         SyncMenu();
     }
 
@@ -523,7 +519,6 @@ internal sealed class TrayApp : ApplicationContext
             item.Checked = item.Tag is LightingEffect effect && effect == _settings.Effect;
 
         _surroundEnabled.Checked = _settings.Surround;
-        _surroundExclusive.Checked = _settings.SurroundExclusive;
         _surroundStatus.Text = $"Durum: {_surround.Status}";
         foreach (var item in _hrirItems)
             item.Checked = item.Tag as string == _settings.SurroundProfile;

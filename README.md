@@ -24,7 +24,7 @@ Kaldırmak için **Kaldir.cmd**: uygulamayı düzgün kapatır (varsayılan ses 
 | Faz | İçerik | Durum |
 |---|---|---|
 | 1 | RGB: aç/kapat, renk, parlaklık, Nefes / Gökkuşağı efektleri | ✅ |
-| 2 | 7.1 sanal surround (kendi motoru + HeSuVi profilleri + VB-CABLE) | ✅ ölçüldü (~17 ms); kulakla karşılaştırma bekliyor |
+| 2 | 7.1 sanal surround (kendi motoru + HeSuVi profilleri + VB-CABLE) | ✅ ~23 ms, kesintisiz |
 | 3 | Pil, şarj, mikrofon durumu; düşük pil ve şarj bitti bildirimleri | ✅ |
 | 4 | EQ ön ayarı ve 10 bantlık özel EQ, sidetone, güç tasarrufu, mikrofon susturma | ✅ komutlar kulaklıkta doğrulandı |
 | 5 | Profiller, Windows ile başlama, genel kısayollar | ✅ |
@@ -39,7 +39,7 @@ Kulaklığın ışıkları standart **HID LampArray** (usage page `0x59`) arayü
 
 - Renkler `LampMultiUpdateReport` (`0x34`) ile gönderiliyor. Bu firmware `LampRangeUpdateReport`'u (`0x35`) yok sayıyor.
 - Feature report'lar kendi gerçek uzunluklarında gönderiliyor. Windows normalde hepsini en uzun raporun boyuna (51 byte) dolduruyor.
-- Kulaklık kapanıp açıldığında renkleri unuttuğu için sabit renk her 5 saniyede bir ve kulaklık yeniden bağlandığı anda gönderiliyor. Efektler 25 fps çalışıyor.
+- Kulaklık kapanıp açıldığında renkleri unuttuğu için sabit renk her 5 saniyede bir ve kulaklık yeniden bağlandığı anda gönderiliyor. Efektler 15 fps çalışıyor; ışık güncellemeleri sesle aynı 2.4 GHz bağlantıdan gidiyor.
 
 ### Kulaklık durumu ve ayarları
 
@@ -70,7 +70,9 @@ oyun ─7.1─► CABLE Input ══ VB-CABLE ══► CABLE Output ─► moto
 - 7.1 açılınca bütün varsayılan roller (iletişim dahil) **Barracuda 7.1** olur; kapanınca ya da uygulamadan çıkınca kulaklığa geri verilir.
 - Windows'un çıkış listesinden **Barracuda 7.1** seçilince 7.1 kendiliğinden açılır; 7.1 açıkken başka bir cihaz seçilince 7.1 kapanır ve seçilen cihaz bütün rollerde varsayılan kalır.
 - Motor, 7.1 sesi HeSuVi profiliyle iki kulağa çevirir. Kanal düzeni ve karıştırma kuralları HeSuVi'nin kaynak kodundan alındı: LFE 111 Hz'de kesilip merkeze eklenir, 7 kanallı profillerde sağ taraf solun aynasıdır. Equalizer APO gerekmez.
-- Gecikme için: 128 örneklik bölümlenmiş FFT konvolüsyonu (2,7 ms), iki kulak tek ters FFT'de; VB-CABLE'ın kayıt tarafı **özel modda** 8 kanal olarak en küçük periyotta okunur (Windows'taki kayıt formatı ayarı önemsizdir); kulaklığa da **özel modda** (Windows karıştırıcısını atlayarak) yazılır, olmazsa paylaşımlı moda düşülür; ara kuyruk küçük başlar ve yalnızca kesinti olursa büyür. Ölçülen: ~17,5 ms (3 ms okuma + 2,7 ms blok + ~9 ms kuyruk + 3 ms çıkış). Oyunun CABLE'a yazarkenki Windows gecikmesi (~10 ms) buna dahil değildir; o her sanal 7.1 çözümünde vardır.
+- Gecikme için: 128 örneklik bölümlenmiş FFT konvolüsyonu (2,7 ms), iki kulak tek ters FFT'de; VB-CABLE'ın kayıt tarafı **özel modda** 8 kanal olarak 3 ms periyotla okunur (Windows'taki kayıt formatı ayarı önemsizdir). Kulaklığa **paylaşımlı modda** yazılır ve her 3 ms'de bir beslenir; kulaklık tamponunda iki Windows periyodu (20 ms) tutulur, ara kuyruk ~0'da kalır. Ölçülen: ~23 ms sabit, kulaklığa saniyede tam 48 000 örnek, 60 sn'de açılıştaki tek kesinti dışında kesinti yok, tek çekirdeğin ~%5'i. Oyunun CABLE'a yazarkenki Windows gecikmesi (~10 ms) buna dahil değildir; o her sanal 7.1 çözümünde vardır.
+- **Kulaklığa özel modda yazılmaz.** USB sürücüsü özel modu kabul ediyor ama uygulamayı yeterince sık uyandırmıyor: 3 ms periyotta saniyede 18 000, 10 ms periyotta 32 000 örnek gidiyor (48 000 gerekirken), yani ses sürekli kesiliyor. Paylaşımlı mod bunu yaşamıyor ve kulaklığa doğrudan çalan uygulamaları (Discord gibi) da susturmuyor.
+- VB-CABLE ile kulaklığın saatleri tam aynı değil (~110 ppm). Kuyruk iki bloğu aşınca her beslemede bir örnek atlanır; gecikme büyümez, atlama duyulmaz. Açılıştan sonraki kesintiler `log.txt`'ye yazılır.
 - Profiller `%APPDATA%\BarracudaTray\hrir` klasöründen okunur (HeSuVi 2.0.0.1 kurulum paketinin `hrir` klasörü, yalnızca 48 kHz dosyalar). Profil dosyaları depoya konmaz.
 
 VB-CABLE kurulduğunda Windows onu stereo olarak ayarlıyor. 7.1 açılınca uygulama **CABLE Input**'u kendisi 7.1 yapar (Ses ayarlarındaki "Gelişmiş" sekmesiyle aynı işlem), elle ayar gerekmez.
@@ -81,7 +83,7 @@ VB-CABLE kurulduğunda Windows onu stereo olarak ayarlıyor. 7.1 açılınca uyg
 - **Chroma kulaklığın içinde kapatılabiliyor.** SmartSwitch'e 3 kez basmak açıp kapatıyor. Kapalıyken bilgisayardan gönderilen hiçbir renk görünmüyor.
 - **Desteklenmeyen bir özelliği sormak dongle'ı kilitliyor.** `0x20` sorgusundan sonra dongle hiçbir output report'u kabul etmedi; çıkarıp takmak gerekti. Yalnızca yukarıdaki tablodaki özellikler soruluyor; her yazma 1 saniyelik zaman aşımıyla iptal edilebiliyor.
 - **Yazma onayı değer değildir.** Kulaklık bir yazmayı `özellik | 0x80` kimliğiyle ve `00` durum byte'ıyla onaylıyor; uygulama bu onayları değer olarak okumuyor, yazdıktan sonra özelliği yeniden soruyor.
-- **Kulaklığı doğrudan seçen uygulamalar özel modda susar.** 7.1 açıkken bütün varsayılan roller (iletişim dahil) Barracuda 7.1'e geçer, ama bir uygulamanın kendi ayarında doğrudan "Razer Barracuda X Chroma" seçiliyse ses oraya gider ve özel mod onu engeller. Discord'da Ayarlar → Ses ve Görüntü → **Konuşmacı: Windows Varsayılanı** seçilmeli; mikrofon da Windows Varsayılanı kalmalı ("VB-Audio Virtual Cable" asla mikrofon seçilmemeli). Ya da menüden özel mod kapatılır: her uygulama duyulur, gecikme ~38 ms olur (kulaklık paylaşımlı modda yalnızca 10 ms periyot destekliyor). `--sessions 10` hangi uygulamanın hangi cihaza çaldığını gösterir.
+- **Kulaklığı doğrudan seçen uygulamalar 7.1'i atlar.** 7.1 açıkken bütün varsayılan roller (iletişim dahil) Barracuda 7.1'e geçer, ama bir uygulamanın kendi ayarında doğrudan "Razer Barracuda X Chroma" seçiliyse sesi 7.1'den geçmeden kulaklığa gider (duyulur ama sanallaştırılmaz). Discord'da Ayarlar → Ses ve Görüntü → **Konuşmacı: Windows Varsayılanı** seçilmeli; mikrofon da Windows Varsayılanı kalmalı. `--sessions 10` hangi uygulamanın hangi cihaza çaldığını gösterir.
 - **"VB-Audio Virtual Cable" asla mikrofon seçilmemeli.** Discord bu cihazı ilk gördüğünde "Sesi VB-Audio Virtual Cable olarak değiştir?" diye sorabilir; pencere X ile kapatılmalı, "Giriş + Çıkışı değiştir" mikrofonu da kabloya çevirir ve karşı taraf sizi duymaz.
 - **Razer uygulamaları arka planda çalışıyorsa** Synapse ışıkları yönetir, Razer'ın 7.1 cihazı da uygulamaları kendine sabitleyebilir. Razer uygulamalarını kaldırın.
 - **Windows Dinamik Aydınlatma** bu cihazda açıksa çakışabilir. Ayarlar → Kişiselleştirme → Dinamik Aydınlatma bölümünden kulaklık için kapatın.
@@ -119,7 +121,8 @@ BarracudaTray.exe --meters 10       # hangi ses cihazından ses geçtiğini 10 s
 BarracudaTray.exe --sessions 10     # hangi uygulama hangi cihaza çalıyor, ne kadar yüksek
 BarracudaTray.exe --surround 5 razer tone  # CABLE'a test tonu çalıp motorun giriş/çıkış seviyesini ölç
 BarracudaTray.exe --selftest razer  # konvolüsyonu bir profile karşı doğrula
-BarracudaTray.exe --surround 10     # 7.1 motorunu 10 sn çalıştır, gecikme dökümünü yazdır (shared: paylaşımlı mod)
+BarracudaTray.exe --surround 10     # 7.1 motorunu 10 sn çalıştır, gecikme ve kulaklığa giden örnek/sn dökümünü yazdır
+BarracudaTray.exe --bench razer     # konvolüsyonun tek başına ne kadar işlemci kullandığı
 ```
 
 ## Derleme

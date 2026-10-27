@@ -22,7 +22,6 @@ internal sealed class AppSettings
     public bool Autonomous { get; set; }
     public bool Surround { get; set; }
     public string SurroundProfile { get; set; } = "razer";
-    public bool SurroundExclusive { get; set; } = true;
     public bool Notifications { get; set; } = true;
     public Dictionary<string, HeadsetProfile> Profiles { get; set; } = [];
 

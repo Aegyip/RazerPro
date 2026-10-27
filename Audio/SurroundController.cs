@@ -30,7 +30,7 @@ internal sealed class SurroundController : IDisposable
     readonly SynchronizationContext _ui;
     readonly System.Windows.Forms.Timer _retry = new() { Interval = 3000 };
     SurroundEngine? _engine;
-    (bool Enabled, string Profile, bool Exclusive) _wanted;
+    (bool Enabled, string Profile) _wanted;
     bool _ownsDefault;
     string _problem = "";
 
@@ -76,9 +76,9 @@ internal sealed class SurroundController : IDisposable
         : _engine is { } engine ? $"≈ {engine.LatencyMs:F0} ms · {engine.Mode}"
         : "Kapalı";
 
-    public void Apply(bool enabled, string profile, bool exclusive)
+    public void Apply(bool enabled, string profile)
     {
-        _wanted = (enabled, profile, exclusive);
+        _wanted = (enabled, profile);
         Restart();
     }
 
@@ -177,7 +177,7 @@ internal sealed class SurroundController : IDisposable
             CoreAudio.SetDefaultEndpoint(cableRender);
             _ownsDefault = true;
 
-            var engine = new SurroundEngine(cableCapture, headset, hrir, _wanted.Exclusive);
+            var engine = new SurroundEngine(cableCapture, headset, hrir);
             engine.Failed += message => _ui.Post(_ =>
             {
                 if (_engine == engine)
@@ -185,8 +185,7 @@ internal sealed class SurroundController : IDisposable
             }, null);
             _engine = engine;
             engine.Start();
-            AppLog.Write($"7.1 açıldı: profil {_wanted.Profile}, {(_wanted.Exclusive ? "özel" : "paylaşımlı")} mod, " +
-                $"CABLE {(sevenOne ? "7.1" : "stereo")}");
+            AppLog.Write($"7.1 açıldı: profil {_wanted.Profile}, CABLE {(sevenOne ? "7.1" : "stereo")}");
 
             if (!sevenOne)
                 _problem = $"Oyunlar şu an stereo gönderiyor: {SurroundDeviceName} 7.1 yapılamadı";

@@ -16,7 +16,6 @@ internal sealed class SurroundEngine : IDisposable
     readonly string _sourceId;
     readonly string _targetId;
     readonly HrirSet _hrir;
-    readonly bool _exclusiveOutput;
     readonly ManualResetEvent _stop = new(false);
     readonly Thread _thread;
     double _latencyMs;
@@ -27,13 +26,11 @@ internal sealed class SurroundEngine : IDisposable
 
     /// <param name="sourceId">Capture endpoint carrying the 7.1 mix (VB-CABLE's output).</param>
     /// <param name="targetId">Render endpoint of the headset.</param>
-    /// <param name="exclusiveOutput">Hold the headset exclusively: lowest latency, but other apps playing to it go silent.</param>
-    public SurroundEngine(string sourceId, string targetId, HrirSet hrir, bool exclusiveOutput)
+    public SurroundEngine(string sourceId, string targetId, HrirSet hrir)
     {
         _sourceId = sourceId;
         _targetId = targetId;
         _hrir = hrir;
-        _exclusiveOutput = exclusiveOutput;
         _thread = new Thread(Run) { IsBackground = true, Name = "Surround engine", Priority = ThreadPriority.Highest };
         _thread.SetApartmentState(ApartmentState.MTA);
     }
@@ -73,7 +70,8 @@ internal sealed class SurroundEngine : IDisposable
             // Taking VB-CABLE's capture side exclusively also picks its channel count ourselves, so the
             // recording format in Windows' Sound settings does not matter.
             var sourceDevice = Track(com, enumerator.GetDevice(_sourceId));
-            var (capture, source, capturePeriod, captureExclusive) = Open(sourceDevice, captureEvent, formats, com, exclusive: true,
+            var (capture, source, capturePeriod, captureExclusive) = Open(sourceDevice, captureEvent, formats, com,
+                exclusive: true, shortestPeriod: true,
             [
                 new(8, HrirSet.SampleRate, 24, false, 0x63F),
                 new(8, HrirSet.SampleRate, 16, false, 0x63F),
@@ -85,30 +83,30 @@ internal sealed class SurroundEngine : IDisposable
                 throw new InvalidOperationException($"VB-CABLE 48000 Hz olmalı; şu an {source}");
             var captureClient = Track(com, (IAudioCaptureClient)GetService(capture, CoreAudio.IidAudioCaptureClient));
 
-            // Exclusive output skips the Windows mixer, the biggest single delay on the way out, but
-            // then nothing else (Discord, which plays to the headset as the communications device)
-            // can be heard. Shared output is the default for that reason.
+            // The headset is always opened shared. Its USB driver accepts exclusive mode but then wakes
+            // the app too rarely to keep the buffer fed (measured: 18 000–32 000 of 48 000 frames/s),
+            // and shared mode also lets Discord and anything else that plays to the headset be heard.
             var targetDevice = Track(com, enumerator.GetDevice(_targetId));
-            var (render, target, renderFrames, renderExclusive) = Open(targetDevice, renderEvent, formats, com, _exclusiveOutput,
-            [
-                new(2, HrirSet.SampleRate, 32, true, 0x3),
-                new(2, HrirSet.SampleRate, 24, false, 0x3),
-                new(2, HrirSet.SampleRate, 16, false, 0x3),
-                new(2, HrirSet.SampleRate, 32, false, 0x3),
-            ]);
+            var (render, target, renderPeriod, _) = Open(targetDevice, renderEvent, formats, com,
+                exclusive: false, shortestPeriod: false, []);
             var renderClient = Track(com, (IAudioRenderClient)GetService(render, CoreAudio.IidAudioRenderClient));
             Volatile.Write(ref _mode,
-                $"çıkış {(renderExclusive ? "özel" : "paylaşımlı")} {target.BitsPerSample}-bit · " +
-                $"giriş {(captureExclusive ? "özel" : "paylaşımlı")} {source.Channels} kanal");
+                $"çıkış paylaşımlı · giriş {(captureExclusive ? "özel" : "paylaşımlı")} {source.Channels} kanal");
 
-            var exclusive = renderExclusive;
-            var pipeline = new Pipeline(_hrir, source, capturePeriod, renderFrames);
-            WriteSilence(renderClient, render, target, exclusive ? renderFrames : (int)render.GetBufferSize());
+            // Windows' mixer takes one period from the headset buffer per pass. Two periods queued there
+            // keep it fed and the queue here empty; 1.5 periods underran more and let this queue creep
+            // up, and filling the whole buffer would only add delay.
+            var deviceTarget = Math.Min(2 * renderPeriod, (int)render.GetBufferSize());
+            var pipeline = new Pipeline(_hrir, source, capturePeriod, renderPeriod);
+            WriteSilence(renderClient, render, target, renderPeriod);
             capture.Start();
             render.Start();
 
             WaitHandle[] handles = [_stop, captureEvent, renderEvent];
             var timeouts = 0;
+            var second = System.Diagnostics.Stopwatch.StartNew();
+            var framesThisSecond = 0;
+            var reportedUnderruns = 0;
             while (true)
             {
                 var signaled = WaitHandle.WaitAny(handles, 500);
@@ -122,17 +120,38 @@ internal sealed class SurroundEngine : IDisposable
                 }
                 timeouts = 0;
 
+                // Top the headset buffer up on every wake-up, capture ones included: audio then waits
+                // in the small device queue instead of piling up here between 10 ms mixer passes.
                 pipeline.Capture(captureClient);
-                if (signaled != 2)
-                    continue;
-                var frames = exclusive ? renderFrames : (int)(render.GetBufferSize() - render.GetCurrentPadding());
-                if (frames == 0)
-                    continue;
-                var buffer = renderClient.GetBuffer((uint)frames);
-                pipeline.Render(buffer, frames, target);
-                renderClient.ReleaseBuffer((uint)frames, 0);
-                Volatile.Write(ref _latencyMs, pipeline.LatencyFrames * 1000.0 / HrirSet.SampleRate);
-                Volatile.Write(ref _breakdown, pipeline.Breakdown);
+                pipeline.TrimDrift();
+                var padding = (int)render.GetCurrentPadding();
+                var room = deviceTarget - padding;
+                // Only pad with silence when the mixer is about to run dry. Just under one period is
+                // still fine: fresh audio arrives every 3 ms, long before the next 10 ms mixer pass.
+                var frames = padding < renderPeriod / 4 ? room : Math.Min(room, pipeline.QueuedFrames);
+                if (frames > 0)
+                {
+                    var buffer = renderClient.GetBuffer((uint)frames);
+                    pipeline.Render(buffer, frames, target, padding);
+                    renderClient.ReleaseBuffer((uint)frames, 0);
+                    framesThisSecond += frames;
+                }
+
+                if (second.ElapsedMilliseconds >= 1000)
+                {
+                    Volatile.Write(ref _latencyMs, pipeline.LatencyFrames * 1000.0 / HrirSet.SampleRate);
+                    Volatile.Write(ref _breakdown, $"{pipeline.Breakdown} · {framesThisSecond} frames/s to headset");
+                    // One underrun while starting up is normal; later ones are audible gaps worth a log line.
+                    // Written off this thread so file I/O never delays the audio.
+                    if (pipeline.Underruns > reportedUnderruns + 1)
+                    {
+                        var gaps = pipeline.Underruns - reportedUnderruns;
+                        Task.Run(() => AppLog.Write($"7.1: son saniyede {gaps} ses kesintisi; kulaklığa {framesThisSecond} örnek/sn"));
+                    }
+                    reportedUnderruns = pipeline.Underruns;
+                    framesThisSecond = 0;
+                    second.Restart();
+                }
             }
             capture.Stop();
             render.Stop();
@@ -188,8 +207,14 @@ internal sealed class SurroundEngine : IDisposable
     /// Opens the first exclusive format the device takes, at its minimum period, or falls back to a
     /// shared stream in the mix format. Frames is the period (shared) or buffer (exclusive) size.
     /// </summary>
+    /// <param name="shortestPeriod">
+    /// Use the driver's minimum period instead of its default one. Only for VB-CABLE: the headset's
+    /// USB driver accepts its 3 ms minimum but then signals only every 8 ms, so each wake-up refills
+    /// a 3 ms buffer and the headset plays silence most of the time.
+    /// </param>
     static (IAudioClient3 Client, AudioFormat Format, int Frames, bool Exclusive) Open(
-        IMMDevice device, AutoResetEvent ready, List<IntPtr> formats, List<object> com, bool exclusive, AudioFormat[] candidates)
+        IMMDevice device, AutoResetEvent ready, List<IntPtr> formats, List<object> com, bool exclusive, bool shortestPeriod,
+        AudioFormat[] candidates)
     {
         if (exclusive)
         {
@@ -200,10 +225,11 @@ internal sealed class SurroundEngine : IDisposable
                 formats.Add(native);
                 try
                 {
-                    client.GetDevicePeriod(out _, out var minimum);
+                    client.GetDevicePeriod(out var standard, out var minimum);
+                    var requested = shortestPeriod ? minimum : standard;
                     try
                     {
-                        client.Initialize(ShareMode.Exclusive, CoreAudio.StreamFlagsEventCallback, minimum, minimum, native, IntPtr.Zero);
+                        client.Initialize(ShareMode.Exclusive, CoreAudio.StreamFlagsEventCallback, requested, requested, native, IntPtr.Zero);
                     }
                     catch (COMException ex) when (ex.HResult == CoreAudio.ErrorBufferSizeNotAligned)
                     {
@@ -259,15 +285,12 @@ internal sealed class SurroundEngine : IDisposable
         readonly AudioFormat _source;
         readonly float[] _converted;
         readonly int _capturePeriod;
-        readonly int _renderFrames;
-        readonly int _maxTarget;
-        int _target;  // stereo frames buffered before playback starts
+        readonly int _renderPeriod;
         int _underruns;
-        int _largestBurst = Block;
-        bool _primed;
-        double _level;
+        double _queueLevel;
+        double _deviceLevel;
 
-        public Pipeline(HrirSet hrir, AudioFormat source, int capturePeriod, int renderFrames)
+        public Pipeline(HrirSet hrir, AudioFormat source, int capturePeriod, int renderPeriod)
         {
             _convolver = new BinauralConvolver(hrir);
             _source = source;
@@ -280,19 +303,31 @@ internal sealed class SurroundEngine : IDisposable
             _input = new SampleFifo(HrirSet.SampleRate * _channels);
             _output = new SampleFifo(HrirSet.SampleRate * 2);
             _capturePeriod = capturePeriod;
-            _renderFrames = renderFrames;
-            // The cushion starts at what one headset buffer needs and grows a block per underrun, so it
-            // settles at the smallest size the capture timing allows; anything beyond that is pure delay.
-            _target = renderFrames + Block;
-            _maxTarget = capturePeriod + renderFrames + 4 * Block;
+            _renderPeriod = renderPeriod;
         }
 
-        /// <summary>Capture period + one block + what sits in the FIFO + the headset buffer.</summary>
-        public double LatencyFrames => _capturePeriod + Block + _level + _renderFrames;
+        public int QueuedFrames => _output.Count / 2;
+
+        public int Underruns => _underruns;
+
+        /// <summary>
+        /// The headset's clock and VB-CABLE's never match exactly (measured about 110 ppm, the cable
+        /// faster), so audio slowly piles up here. Dropping one frame per top-up while more than two
+        /// blocks wait keeps the delay flat without an audible jump. Must run before the amount to
+        /// render is decided, or the dropped frame would be replaced by silence.
+        /// </summary>
+        public void TrimDrift()
+        {
+            if (_output.Count / 2 > 2 * Block)
+                _output.Discard(2);
+        }
+
+        /// <summary>Capture period + one block + what waits here + what waits in the headset's buffer.</summary>
+        public double LatencyFrames => _capturePeriod + Block + _queueLevel + _deviceLevel;
 
         public string Breakdown =>
-            $"capture {_capturePeriod} + block {Block} + queue {_level:F0} (target {_target}, underruns {_underruns}) " +
-            $"+ render {_renderFrames} frames · peak in {TakePeak(ref _inputPeak):F3} out {TakePeak(ref _outputPeak):F3}";
+            $"capture {_capturePeriod} + block {Block} + queue {_queueLevel:F0} + headset buffer {_deviceLevel:F0} frames " +
+            $"(underruns {_underruns}) · peak in {TakePeak(ref _inputPeak):F3} out {TakePeak(ref _outputPeak):F3}";
 
         // Loudest sample since the last Breakdown read, for checking that audio actually flows.
         float _inputPeak;
@@ -326,7 +361,6 @@ internal sealed class SurroundEngine : IDisposable
                 client.ReleaseBuffer(frames);
             }
 
-            var before = _output.Count / 2;
             while (_input.Count >= _block.Length)
             {
                 _input.Read(_block);
@@ -334,7 +368,6 @@ internal sealed class SurroundEngine : IDisposable
                 Process();
                 TrackPeak(ref _outputPeak, _stereo);
             }
-            _largestBurst = Math.Max(_largestBurst, _output.Count / 2 - before);
         }
 
         unsafe ReadOnlySpan<float> Convert(byte* data, int samples)
@@ -393,34 +426,29 @@ internal sealed class SurroundEngine : IDisposable
             _output.Write(_stereo);
         }
 
-        public unsafe void Render(IntPtr buffer, int frames, AudioFormat format)
+        /// <summary>
+        /// Moves up to <paramref name="frames"/> queued frames into the headset buffer, padding with
+        /// silence only when the caller asks for more than is queued (the mixer is about to run dry).
+        /// </summary>
+        public unsafe void Render(IntPtr buffer, int frames, AudioFormat format, int devicePadding)
         {
             var queued = _output.Count / 2;
-            // Clock drift between VB-CABLE and the headset slowly grows the queue; trim it back. Audio
-            // arrives in bursts, so a queue up to one burst above the target is normal, not drift.
-            if (queued > _target + _largestBurst + _renderFrames)
+            // After a stall (the thread starved, a device hiccup) catch up in one go.
+            if (queued > frames + _renderPeriod)
             {
-                _output.Discard((queued - _target) * 2);
-                queued = _target;
+                _output.Discard((queued - frames) * 2);
+                queued = frames;
             }
-            if (!_primed && queued >= _target)
-                _primed = true;
-            _level += (queued - _level) * 0.05;
 
             Span<float> stereo = stackalloc float[frames * 2];
-            if (_primed)
-            {
-                var available = Math.Min(frames, queued);
-                _output.Read(stereo[..(available * 2)]);
-                if (available < frames)
-                {
-                    // Underrun: the cushion was too thin for the capture timing. Grow it and rebuild.
-                    _primed = false;
-                    _underruns++;
-                    _target = Math.Min(_target + Block, _maxTarget);
-                }
-            }
+            var available = Math.Min(frames, queued);
+            _output.Read(stereo[..(available * 2)]);
+            if (available < frames)
+                _underruns++;
             Write(buffer, stereo, frames, format);
+
+            _queueLevel += (_output.Count / 2 - _queueLevel) * 0.02;
+            _deviceLevel += (devicePadding + frames - _deviceLevel) * 0.02;
         }
 
         static unsafe void Write(IntPtr buffer, ReadOnlySpan<float> stereo, int frames, AudioFormat format)

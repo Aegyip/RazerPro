@@ -24,7 +24,8 @@ internal sealed class LightingEngine : IDisposable
     static readonly TimeSpan RescanInterval = TimeSpan.FromSeconds(3);
     // The headset forgets host-set colors when it powers off, so a still state is re-sent this often.
     static readonly TimeSpan StaticRefresh = TimeSpan.FromSeconds(5);
-    static readonly TimeSpan FrameInterval = TimeSpan.FromMilliseconds(40);
+    // Light updates travel over the same 2.4 GHz link as the audio, so effects stay at 15 fps.
+    static readonly TimeSpan FrameInterval = TimeSpan.FromMilliseconds(66);
     static readonly TimeSpan IdleInterval = TimeSpan.FromSeconds(1);
     const double BreathingPeriodSeconds = 4;
     const double SpectrumPeriodSeconds = 8;

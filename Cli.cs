@@ -66,12 +66,14 @@ internal static class Cli
                     return Sessions(args.Length > 1 && int.TryParse(args[1], out var sessionSeconds) ? sessionSeconds : 5);
                 case "--meters":
                     return Meters(args.Length > 1 && int.TryParse(args[1], out var meterSeconds) ? meterSeconds : 5);
+                case "--bench":
+                    return Bench(args.Length > 1 ? args[1] : "razer");
                 case "--selftest":
                     return SelfTest(args.Length > 1 ? args[1] : "razer");
                 case "--surround":
                     return Surround(args.Length > 1 && int.TryParse(args[1], out var runSeconds) ? runSeconds : 10,
-                        args.Length > 2 && !args[2].StartsWith('-') && args[2] is not ("shared" or "tone") ? args[2] : "razer",
-                        exclusive: !args.Contains("shared"), withTone: args.Contains("tone"));
+                        args.Length > 2 && !args[2].StartsWith('-') && args[2] != "tone" ? args[2] : "razer",
+                        withTone: args.Contains("tone"));
                 case "--off":
                     return WithDevice(d =>
                     {
@@ -378,6 +380,25 @@ internal static class Cli
         return supported.Count > 0 ? string.Join(" ", supported) : "none";
     }
 
+    /// <summary>How much of one core the convolution alone needs for real-time 48 kHz audio.</summary>
+    static int Bench(string profile)
+    {
+        var convolver = new BinauralConvolver(HrirSet.Load(HrirLibrary.PathOf(profile)));
+        const int block = BinauralConvolver.BlockSize;
+        var input = Enumerable.Range(0, 7).Select(_ => Enumerable.Range(0, block).Select(i => MathF.Sin(i)).ToArray()).ToArray();
+        var left = new float[block];
+        var right = new float[block];
+        for (var i = 0; i < 2000; i++)
+            convolver.Process(input, left, right);
+        const int blocks = 48000 / block * 10; // ten seconds of audio
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        for (var i = 0; i < blocks; i++)
+            convolver.Process(input, left, right);
+        var ms = clock.Elapsed.TotalMilliseconds;
+        Console.WriteLine($"{profile}: 10 s of audio in {ms:F0} ms = {ms / 100:F1}% of one core");
+        return 0;
+    }
+
     /// <summary>
     /// Feeds an impulse to each virtual speaker and checks both ears get exactly that speaker's
     /// impulse responses back. Exercises the FFT, partitioning and HeSuVi channel mapping.
@@ -419,7 +440,7 @@ internal static class Cli
         return ok ? 0 : 1;
     }
 
-    static int Surround(int seconds, string profile, bool exclusive, bool withTone)
+    static int Surround(int seconds, string profile, bool withTone)
     {
         var (cable, source) = SurroundController.PrepareCable();
         var target = CoreAudio.FindEndpoint(DataFlow.Render, SurroundController.HeadsetName);
@@ -428,7 +449,7 @@ internal static class Cli
             Console.WriteLine(source is null ? "VB-CABLE not installed" : "Headset audio device not found");
             return 1;
         }
-        using var engine = new SurroundEngine(source, target, HrirSet.Load(HrirLibrary.PathOf(profile)), exclusive);
+        using var engine = new SurroundEngine(source, target, HrirSet.Load(HrirLibrary.PathOf(profile)));
         var failed = false;
         engine.Failed += message =>
         {
