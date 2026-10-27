@@ -83,6 +83,8 @@ internal sealed class TrayApp : ApplicationContext
     readonly ToolStripMenuItem _profiles = new("Profiller");
     readonly ToolStripMenuItem _startup;
     readonly ToolStripMenuItem _notifications;
+    readonly ToolStripMenuItem _iconMenu = new("Simgeyi değiştir");
+    readonly ToolStripMenuItem _defaultIcon;
 
     Icon? _icon;
     bool _wasLinked;
@@ -115,12 +117,17 @@ internal sealed class TrayApp : ApplicationContext
         BuildSoundMenu();
 
         _startup = new ToolStripMenuItem("Windows ile başlat", null, (_, _) => ToggleStartup());
+        _defaultIcon = new ToolStripMenuItem("Varsayılan simge", null, (_, _) => ResetCustomIcon());
         _notifications = new ToolStripMenuItem("Bildirimler", null, (_, _) =>
         {
             _settings.Notifications = !_settings.Notifications;
             _settings.Save();
             SyncMenu();
         });
+        _iconMenu.DropDownItems.AddRange([
+            new ToolStripMenuItem("Resim seç…", null, (_, _) => PickCustomIcon()),
+            _defaultIcon,
+        ]);
 
         menu.Items.AddRange([
             _status,
@@ -139,6 +146,7 @@ internal sealed class TrayApp : ApplicationContext
             _profiles,
             _startup,
             _notifications,
+            _iconMenu,
             new ToolStripSeparator(),
             new ToolStripMenuItem("Çıkış", null, (_, _) => ExitThread()),
         ]);
@@ -219,6 +227,7 @@ internal sealed class TrayApp : ApplicationContext
             _engine.Dispose();
             _tray.Dispose();
             _icon?.Dispose();
+            _customIcon?.Dispose();
         }
         base.Dispose(disposing);
     }
@@ -538,6 +547,7 @@ internal sealed class TrayApp : ApplicationContext
 
         _startup.Checked = StartupRegistration.IsEnabled;
         _notifications.Checked = _settings.Notifications;
+        _defaultIcon.Enabled = _customIcon is not null;
 
         var state = !connected ? _status.Text
             : _settings.Autonomous ? "kulaklığın efekti"
@@ -558,18 +568,23 @@ internal sealed class TrayApp : ApplicationContext
     static string Truncate(string text, int length) => text.Length <= length ? text : text[..length];
 
     /// <summary>
-    /// The user's own tray picture, if they put one at %APPDATA%\BarracudaTray\icon.png. The app
-    /// ships no logo of its own; the lighting and connection state is then shown as a corner badge.
+    /// The user's own tray picture, chosen with "Simgeyi değiştir…" and kept at
+    /// %APPDATA%\BarracudaTray\icon.png. The app ships no logo of its own (the repository is
+    /// public), so any brand picture stays on the user's machine. With one set, the lighting and
+    /// connection state is shown as a corner badge.
     /// </summary>
-    static readonly Lazy<Image?> CustomIcon = new(() =>
+    static string CustomIconPath => Path.Combine(Path.GetDirectoryName(AppLog.FilePath)!, "icon.png");
+
+    Image? _customIcon = LoadCustomIcon();
+
+    static Image? LoadCustomIcon()
     {
-        var path = Path.Combine(Path.GetDirectoryName(AppLog.FilePath)!, "icon.png");
         try
         {
-            if (!File.Exists(path))
+            if (!File.Exists(CustomIconPath))
                 return null;
             // Copied out of the stream so the file is not kept locked.
-            using var file = Image.FromFile(path);
+            using var file = Image.FromFile(CustomIconPath);
             return new Bitmap(file);
         }
         catch (Exception ex) when (ex is IOException or OutOfMemoryException or ArgumentException)
@@ -577,7 +592,55 @@ internal sealed class TrayApp : ApplicationContext
             AppLog.Write($"icon.png okunamadı: {ex.Message}");
             return null;
         }
-    });
+    }
+
+    void PickCustomIcon()
+    {
+        using var dialog = new OpenFileDialog
+        {
+            Title = "Tray simgesi için resim seç",
+            Filter = "Resimler (*.png;*.ico;*.jpg;*.bmp)|*.png;*.ico;*.jpg;*.jpeg;*.bmp",
+        };
+        if (dialog.ShowDialog() != DialogResult.OK)
+            return;
+        try
+        {
+            // Stored as PNG whatever came in, so an .ico keeps its largest size and transparency.
+            using Image source = Path.GetExtension(dialog.FileName).Equals(".ico", StringComparison.OrdinalIgnoreCase)
+                ? new Icon(dialog.FileName, 256, 256).ToBitmap()
+                : Image.FromFile(dialog.FileName);
+            Directory.CreateDirectory(Path.GetDirectoryName(CustomIconPath)!);
+            source.Save(CustomIconPath, System.Drawing.Imaging.ImageFormat.Png);
+        }
+        catch (Exception ex) when (ex is IOException or OutOfMemoryException or ArgumentException or UnauthorizedAccessException)
+        {
+            Notify("Simge", $"Resim kullanılamadı: {ex.Message}");
+            return;
+        }
+        ReplaceCustomIcon(LoadCustomIcon());
+    }
+
+    void ResetCustomIcon()
+    {
+        try
+        {
+            File.Delete(CustomIconPath);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Notify("Simge", ex.Message);
+            return;
+        }
+        ReplaceCustomIcon(null);
+    }
+
+    void ReplaceCustomIcon(Image? icon)
+    {
+        var old = _customIcon;
+        _customIcon = icon;
+        old?.Dispose();
+        SyncMenu();
+    }
 
     Icon DrawIcon(bool connected)
     {
@@ -587,7 +650,7 @@ internal sealed class TrayApp : ApplicationContext
             g.SmoothingMode = SmoothingMode.AntiAlias;
             g.InterpolationMode = InterpolationMode.HighQualityBicubic;
             var bounds = new Rectangle(3, 3, 26, 26);
-            if (CustomIcon.Value is { } picture)
+            if (_customIcon is { } picture)
             {
                 g.DrawImage(picture, new Rectangle(0, 0, 32, 32));
                 bounds = new Rectangle(20, 20, 11, 11);
@@ -607,7 +670,7 @@ internal sealed class TrayApp : ApplicationContext
                 using var fill = new SolidBrush(Color.FromArgb(c.R, c.G, c.B));
                 g.FillEllipse(fill, bounds);
             }
-            using var ring = new Pen(connected ? Color.White : Color.DimGray, CustomIcon.Value is null ? 3 : 1.5f);
+            using var ring = new Pen(connected ? Color.White : Color.DimGray, _customIcon is null ? 3 : 1.5f);
             g.DrawEllipse(ring, bounds);
             if (!connected)
                 g.DrawLine(ring, bounds.Left + 3, bounds.Bottom - 3, bounds.Right - 3, bounds.Top + 3);

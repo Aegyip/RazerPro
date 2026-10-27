@@ -98,7 +98,7 @@ Tray simgesine sağ tıklayınca menü açılır, çift tıklamak ışıkları a
 | Ctrl+Alt+S | 7.1'i aç/kapat |
 | Ctrl+Alt+M | Mikrofonu sustur/aç |
 
-Başka bir program aynı kısayolu kullanıyorsa o kısayol menüde görünmez. **Profiller** menüsü ışık, 7.1 ve kulaklık ses ayarlarının (EQ, sidetone) o anki halini adıyla kaydeder. **Windows ile başlat** kullanıcı başına `Run` anahtarını kullanır, yönetici izni gerekmez. Ayarlar `%APPDATA%\BarracudaTray\settings.json` dosyasında saklanır.
+Başka bir program aynı kısayolu kullanıyorsa o kısayol menüde görünmez. **Simgeyi değiştir → Resim seç…** ile tray simgesi için kendi resminiz (PNG, ICO, JPG) seçilebilir; resim yalnızca `%APPDATA%\BarracudaTray\icon.png` olarak saklanır, uygulamayla dağıtılmaz. Işık rengi ve bağlantı durumu simgenin köşesinde küçük bir nokta olarak görünür. **Profiller** menüsü ışık, 7.1 ve kulaklık ses ayarlarının (EQ, sidetone) o anki halini adıyla kaydeder. **Windows ile başlat** kullanıcı başına `Run` anahtarını kullanır, yönetici izni gerekmez. Ayarlar `%APPDATA%\BarracudaTray\settings.json` dosyasında saklanır.
 
 Test için komut satırı modları:
 
