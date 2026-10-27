@@ -3,14 +3,25 @@ namespace BarracudaTray.Audio;
 /// <summary>
 /// Turns virtual 7.1 on and off from the UI thread: makes VB-CABLE the default playback device so
 /// games send their 7.1 mix there, runs the <see cref="SurroundEngine"/>, and hands the default back
-/// to the headset when switched off or on exit (otherwise the PC would go silent).
+/// to the headset when switched off or on exit (otherwise the PC would go silent). While 7.1 is off
+/// the VB-CABLE devices are disabled so they stay out of Windows' device lists.
+/// The communications role (Discord and other voice apps) moves to VB-CABLE too: with the headset
+/// held exclusively, anything still playing to it directly would be silent.
 /// </summary>
 internal sealed class SurroundController : IDisposable
 {
-    // VB-CABLE also adds a "CABLE In 16ch" playback device; the plain "CABLE Input" is the one used.
-    public const string CableRenderName = "CABLE Input (VB-Audio";
-    public const string CableCaptureName = "CABLE Output (VB-Audio";
     public const string HeadsetName = "Barracuda X Chroma";
+
+    /// <summary>What VB-CABLE's input is renamed to, so the output picker shows something meaningful.</summary>
+    public const string SurroundDeviceName = "Barracuda 7.1";
+
+    // VB-CABLE's endpoints are found by their device ("VB-Audio Virtual Cable") and their own name.
+    // Its naming is from the cable's point of view: games play into "CABLE Input" (a playback
+    // device) and the engine records "CABLE Output" (a recording device). Any other VB-CABLE
+    // endpoint, such as "CABLE In 16ch", is unused and kept disabled.
+    const string CableInterface = "VB-Audio";
+    const string CableInputName = "CABLE Input";
+    const string CableOutputName = "CABLE Output";
 
     readonly SynchronizationContext _ui;
     readonly System.Windows.Forms.Timer _retry = new() { Interval = 3000 };
@@ -50,6 +61,57 @@ internal sealed class SurroundController : IDisposable
         _retry.Dispose();
         StopEngine();
         RestoreDefault();
+        ShowCable(false);
+    }
+
+    /// <summary>VB-CABLE's input and output if they are currently enabled; changes nothing.</summary>
+    public static (string? Render, string? Capture) FindCable()
+    {
+        var render = CoreAudio.AllEndpoints(DataFlow.Render)
+            .FirstOrDefault(e => e.Active && e.Interface.Contains(CableInterface) && e.Description is CableInputName or SurroundDeviceName);
+        var capture = CoreAudio.AllEndpoints(DataFlow.Capture)
+            .FirstOrDefault(e => e.Active && e.Interface.Contains(CableInterface) && e.Description == CableOutputName);
+        return (render.Id, capture.Id);
+    }
+
+    /// <summary>
+    /// Enables (or disables) VB-CABLE's input and output and returns their ids; extra VB-CABLE
+    /// endpoints are always disabled. The input is renamed the first time it is shown.
+    /// </summary>
+    public static (string? Render, string? Capture) ShowCable(bool show)
+    {
+        try
+        {
+            string? render = null;
+            foreach (var e in CoreAudio.AllEndpoints(DataFlow.Render).Where(e => e.Interface.Contains(CableInterface)))
+            {
+                var ours = e.Description is CableInputName or SurroundDeviceName;
+                if (ours)
+                {
+                    render = e.Id;
+                    if (show && e.Description != SurroundDeviceName)
+                        CoreAudio.Rename(e.Id, SurroundDeviceName);
+                }
+                if (e.Active != (ours && show))
+                    CoreAudio.SetEnabled(e.Id, ours && show);
+            }
+
+            string? capture = null;
+            foreach (var e in CoreAudio.AllEndpoints(DataFlow.Capture).Where(e => e.Interface.Contains(CableInterface)))
+            {
+                var ours = e.Description == CableOutputName;
+                if (ours)
+                    capture = e.Id;
+                if (e.Active != (ours && show))
+                    CoreAudio.SetEnabled(e.Id, ours && show);
+            }
+            return (render, capture);
+        }
+        catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException or InvalidCastException or UnauthorizedAccessException)
+        {
+            AppLog.Write($"7.1: VB-CABLE cihazları {(show ? "açılamadı" : "gizlenemedi")}: {ex.Message}");
+            return (null, null);
+        }
     }
 
     void Restart()
@@ -60,6 +122,7 @@ internal sealed class SurroundController : IDisposable
         if (!_wanted.Enabled)
         {
             RestoreDefault();
+            ShowCable(false);
             Changed?.Invoke();
             return;
         }
@@ -77,10 +140,7 @@ internal sealed class SurroundController : IDisposable
 
         try
         {
-            // VB-CABLE's naming is from the cable's point of view: games play into "CABLE Input"
-            // (a render endpoint) and the engine records "CABLE Output" (a capture endpoint).
-            var cableRender = CoreAudio.FindEndpoint(DataFlow.Render, CableRenderName);
-            var cableCapture = CoreAudio.FindEndpoint(DataFlow.Capture, CableCaptureName);
+            var (cableRender, cableCapture) = ShowCable(true);
             if (cableRender is null || cableCapture is null)
             {
                 Fail("VB-CABLE kurulu değil", retry: false);
@@ -93,6 +153,7 @@ internal sealed class SurroundController : IDisposable
                 return;
             }
 
+            var sevenOne = EnsureSevenOne(cableRender);
             CoreAudio.SetDefaultEndpoint(cableRender);
             _ownsDefault = true;
 
@@ -104,9 +165,11 @@ internal sealed class SurroundController : IDisposable
             }, null);
             _engine = engine;
             engine.Start();
+            AppLog.Write($"7.1 açıldı: profil {_wanted.Profile}, {(_wanted.Exclusive ? "özel" : "paylaşımlı")} mod, " +
+                $"CABLE {(sevenOne ? "7.1" : "stereo")}");
 
-            if (!EnsureSevenOne(cableRender))
-                _problem = "Oyunlar şu an stereo gönderiyor: CABLE Input'u 7.1 yap (Ses → Yapılandır)";
+            if (!sevenOne)
+                _problem = $"Oyunlar şu an stereo gönderiyor: {SurroundDeviceName} 7.1 yapılamadı";
         }
         catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException or InvalidCastException or ArgumentException or UnauthorizedAccessException)
         {
@@ -142,10 +205,14 @@ internal sealed class SurroundController : IDisposable
     {
         StopEngine();
         _problem = problem;
+        AppLog.Write($"7.1: {problem}{(retry ? " (3 sn sonra yeniden denenecek)" : "")}");
         if (retry)
             _retry.Start();
         else
+        {
             RestoreDefault();
+            ShowCable(false);
+        }
         Changed?.Invoke();
     }
 

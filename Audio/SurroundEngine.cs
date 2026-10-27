@@ -16,7 +16,7 @@ internal sealed class SurroundEngine : IDisposable
     readonly string _sourceId;
     readonly string _targetId;
     readonly HrirSet _hrir;
-    readonly bool _exclusive;
+    readonly bool _exclusiveOutput;
     readonly ManualResetEvent _stop = new(false);
     readonly Thread _thread;
     double _latencyMs;
@@ -27,12 +27,13 @@ internal sealed class SurroundEngine : IDisposable
 
     /// <param name="sourceId">Capture endpoint carrying the 7.1 mix (VB-CABLE's output).</param>
     /// <param name="targetId">Render endpoint of the headset.</param>
-    public SurroundEngine(string sourceId, string targetId, HrirSet hrir, bool exclusive)
+    /// <param name="exclusiveOutput">Hold the headset exclusively: lowest latency, but other apps playing to it go silent.</param>
+    public SurroundEngine(string sourceId, string targetId, HrirSet hrir, bool exclusiveOutput)
     {
         _sourceId = sourceId;
         _targetId = targetId;
         _hrir = hrir;
-        _exclusive = exclusive;
+        _exclusiveOutput = exclusiveOutput;
         _thread = new Thread(Run) { IsBackground = true, Name = "Surround engine", Priority = ThreadPriority.Highest };
         _thread.SetApartmentState(ApartmentState.MTA);
     }
@@ -72,7 +73,7 @@ internal sealed class SurroundEngine : IDisposable
             // Taking VB-CABLE's capture side exclusively also picks its channel count ourselves, so the
             // recording format in Windows' Sound settings does not matter.
             var sourceDevice = Track(com, enumerator.GetDevice(_sourceId));
-            var (capture, source, capturePeriod, captureExclusive) = Open(sourceDevice, captureEvent, formats, com,
+            var (capture, source, capturePeriod, captureExclusive) = Open(sourceDevice, captureEvent, formats, com, exclusive: true,
             [
                 new(8, HrirSet.SampleRate, 24, false, 0x63F),
                 new(8, HrirSet.SampleRate, 16, false, 0x63F),
@@ -84,9 +85,11 @@ internal sealed class SurroundEngine : IDisposable
                 throw new InvalidOperationException($"VB-CABLE 48000 Hz olmalı; şu an {source}");
             var captureClient = Track(com, (IAudioCaptureClient)GetService(capture, CoreAudio.IidAudioCaptureClient));
 
-            // Exclusive output skips the Windows mixer, the biggest single delay on the way out.
+            // Exclusive output skips the Windows mixer, the biggest single delay on the way out, but
+            // then nothing else (Discord, which plays to the headset as the communications device)
+            // can be heard. Shared output is the default for that reason.
             var targetDevice = Track(com, enumerator.GetDevice(_targetId));
-            var (render, target, renderFrames, renderExclusive) = Open(targetDevice, renderEvent, formats, com,
+            var (render, target, renderFrames, renderExclusive) = Open(targetDevice, renderEvent, formats, com, _exclusiveOutput,
             [
                 new(2, HrirSet.SampleRate, 32, true, 0x3),
                 new(2, HrirSet.SampleRate, 24, false, 0x3),
@@ -185,10 +188,10 @@ internal sealed class SurroundEngine : IDisposable
     /// Opens the first exclusive format the device takes, at its minimum period, or falls back to a
     /// shared stream in the mix format. Frames is the period (shared) or buffer (exclusive) size.
     /// </summary>
-    (IAudioClient3 Client, AudioFormat Format, int Frames, bool Exclusive) Open(
-        IMMDevice device, AutoResetEvent ready, List<IntPtr> formats, List<object> com, AudioFormat[] candidates)
+    static (IAudioClient3 Client, AudioFormat Format, int Frames, bool Exclusive) Open(
+        IMMDevice device, AutoResetEvent ready, List<IntPtr> formats, List<object> com, bool exclusive, AudioFormat[] candidates)
     {
-        if (_exclusive)
+        if (exclusive)
         {
             foreach (var format in candidates)
             {
@@ -289,7 +292,24 @@ internal sealed class SurroundEngine : IDisposable
 
         public string Breakdown =>
             $"capture {_capturePeriod} + block {Block} + queue {_level:F0} (target {_target}, underruns {_underruns}) " +
-            $"+ render {_renderFrames} frames";
+            $"+ render {_renderFrames} frames · peak in {TakePeak(ref _inputPeak):F3} out {TakePeak(ref _outputPeak):F3}";
+
+        // Loudest sample since the last Breakdown read, for checking that audio actually flows.
+        float _inputPeak;
+        float _outputPeak;
+
+        static float TakePeak(ref float peak)
+        {
+            var value = peak;
+            peak = 0;
+            return value;
+        }
+
+        static void TrackPeak(ref float peak, ReadOnlySpan<float> samples)
+        {
+            foreach (var s in samples)
+                peak = Math.Max(peak, Math.Abs(s));
+        }
 
         public unsafe void Capture(IAudioCaptureClient client)
         {
@@ -310,7 +330,9 @@ internal sealed class SurroundEngine : IDisposable
             while (_input.Count >= _block.Length)
             {
                 _input.Read(_block);
+                TrackPeak(ref _inputPeak, _block);
                 Process();
+                TrackPeak(ref _outputPeak, _stereo);
             }
             _largestBurst = Math.Max(_largestBurst, _output.Count / 2 - before);
         }

@@ -46,13 +46,20 @@ internal static class Cli
                     return Status();
                 case "--configure-cable":
                     return ConfigureCable();
+                case "--reset-app-devices":
+                    AppAudioRouting.ClearAll();
+                    Console.WriteLine("Per-app audio devices cleared");
+                    return 0;
+                case "--endpoint-enable" when args.Length > 2:
+                    return EndpointEnable(args[1], args[2] != "off");
                 case "--meters":
                     return Meters(args.Length > 1 && int.TryParse(args[1], out var meterSeconds) ? meterSeconds : 5);
                 case "--selftest":
                     return SelfTest(args.Length > 1 ? args[1] : "razer");
                 case "--surround":
                     return Surround(args.Length > 1 && int.TryParse(args[1], out var runSeconds) ? runSeconds : 10,
-                        args.Length > 2 ? args[2] : "razer", exclusive: !args.Contains("shared"));
+                        args.Length > 2 && !args[2].StartsWith('-') && args[2] is not ("shared" or "tone") ? args[2] : "razer",
+                        exclusive: !args.Contains("shared"), withTone: args.Contains("tone"));
                 case "--off":
                     return WithDevice(d =>
                     {
@@ -205,21 +212,38 @@ internal static class Cli
                 }
                 Console.WriteLine($"  {name}  [{format}]");
                 Console.WriteLine($"    exclusive 48 kHz: {ExclusiveSupport(enumerator, id)}");
+                Console.WriteLine($"    shared periods: {SharedPeriods(enumerator, id)}");
             }
         }
         return 0;
     }
 
-    /// <summary>Switches VB-CABLE's input to 7.1; used by the installer.</summary>
+    /// <summary>Enables or disables every playback/recording endpoint whose own name is <paramref name="description"/>.</summary>
+    static int EndpointEnable(string description, bool enabled)
+    {
+        var matches = new[] { DataFlow.Render, DataFlow.Capture }
+            .SelectMany(CoreAudio.AllEndpoints)
+            .Where(e => e.Description.Equals(description, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        foreach (var endpoint in matches)
+        {
+            CoreAudio.SetEnabled(endpoint.Id, enabled);
+            Console.WriteLine($"{endpoint.Description} ({endpoint.Interface}): {(enabled ? "enabled" : "disabled")}");
+        }
+        return matches.Count > 0 ? 0 : 1;
+    }
+
+    /// <summary>Switches VB-CABLE's input to 7.1, then hides the cable again as the app does while 7.1 is off.</summary>
     static int ConfigureCable()
     {
-        if (CoreAudio.FindEndpoint(DataFlow.Render, SurroundController.CableRenderName) is not { } cable)
+        if (SurroundController.ShowCable(true).Render is not { } cable)
         {
             Console.WriteLine("VB-CABLE not installed");
             return 1;
         }
         var ok = SurroundController.EnsureSevenOne(cable);
-        Console.WriteLine(ok ? $"CABLE Input: {CoreAudio.MixFormat(cable)}" : "Could not switch CABLE Input to 7.1");
+        Console.WriteLine(ok ? $"{SurroundController.SurroundDeviceName}: {CoreAudio.MixFormat(cable)}" : "Could not switch the cable to 7.1");
+        SurroundController.ShowCable(false);
         return ok ? 0 : 1;
     }
 
@@ -252,6 +276,27 @@ internal static class Cli
             Console.WriteLine(string.Join("  ", meters.Select(m => $"{m.Name[..Math.Min(22, m.Name.Length)]}={m.Meter.GetPeakValue():F2}")));
         }
         return 0;
+    }
+
+    /// <summary>Shared-mode engine periods the driver offers (IAudioClient3), in frames.</summary>
+    static string SharedPeriods(IMMDeviceEnumerator enumerator, string id)
+    {
+        var client = CoreAudio.Activate(enumerator.GetDevice(id));
+        var mix = client.GetMixFormat();
+        try
+        {
+            client.GetSharedModeEnginePeriod(mix, out var standard, out var fundamental, out var minimum, out var maximum);
+            return $"default {standard}, min {minimum}, step {fundamental}, max {maximum}";
+        }
+        catch (System.Runtime.InteropServices.COMException ex)
+        {
+            return $"unavailable (0x{ex.HResult:X8})";
+        }
+        finally
+        {
+            System.Runtime.InteropServices.Marshal.FreeCoTaskMem(mix);
+            System.Runtime.InteropServices.Marshal.ReleaseComObject(client);
+        }
     }
 
     /// <summary>Which channel counts and sample types the driver itself accepts (read-only check).</summary>
@@ -320,9 +365,9 @@ internal static class Cli
         return ok ? 0 : 1;
     }
 
-    static int Surround(int seconds, string profile, bool exclusive)
+    static int Surround(int seconds, string profile, bool exclusive, bool withTone)
     {
-        var source = CoreAudio.FindEndpoint(DataFlow.Capture, SurroundController.CableCaptureName);
+        var (cable, source) = SurroundController.ShowCable(true);
         var target = CoreAudio.FindEndpoint(DataFlow.Render, SurroundController.HeadsetName);
         if (source is null || target is null)
         {
@@ -337,12 +382,62 @@ internal static class Cli
             Console.WriteLine($"Failed: {message}");
         };
         engine.Start();
+        using var tone = withTone && cable is not null ? TestTone.Start(cable) : null;
         for (var i = 0; i < seconds && !failed; i++)
         {
             Thread.Sleep(1000);
             Console.WriteLine($"{i + 1,3}s  ~{engine.LatencyMs:F1} ms  {engine.Mode}  ({engine.Breakdown})");
         }
         return failed ? 1 : 0;
+    }
+
+    /// <summary>A quiet 440 Hz tone on the front-left channel of a playback device, shared mode.</summary>
+    sealed class TestTone : IDisposable
+    {
+        readonly ManualResetEvent _stop = new(false);
+        readonly Thread _thread;
+
+        TestTone(string deviceId)
+        {
+            _thread = new Thread(() => Run(deviceId)) { IsBackground = true };
+            _thread.SetApartmentState(ApartmentState.MTA);
+            _thread.Start();
+        }
+
+        public static TestTone Start(string deviceId) => new(deviceId);
+
+        unsafe void Run(string deviceId)
+        {
+            var enumerator = CoreAudio.CreateEnumerator();
+            var client = CoreAudio.Activate(enumerator.GetDevice(deviceId));
+            var format = AudioFormat.ReadAndFree(client.GetMixFormat());
+            var native = format.Allocate();
+            client.Initialize(ShareMode.Shared, 0, 1_000_000, 0, native, IntPtr.Zero);
+            System.Runtime.InteropServices.Marshal.FreeHGlobal(native);
+            var iid = CoreAudio.IidAudioRenderClient;
+            var render = (IAudioRenderClient)client.GetService(ref iid);
+            var size = client.GetBufferSize();
+            client.Start();
+            long t = 0;
+            while (!_stop.WaitOne(10))
+            {
+                var frames = size - client.GetCurrentPadding();
+                if (frames == 0)
+                    continue;
+                var p = (float*)render.GetBuffer(frames);
+                for (var f = 0; f < frames; f++, t++)
+                    for (var c = 0; c < format.Channels; c++)
+                        p[f * format.Channels + c] = c == 0 ? 0.25f * MathF.Sin(2 * MathF.PI * 440 * t / format.SampleRate) : 0;
+                render.ReleaseBuffer(frames, 0);
+            }
+            client.Stop();
+        }
+
+        public void Dispose()
+        {
+            _stop.Set();
+            _thread.Join(1000);
+        }
     }
 
     static int WithDevice(Action<LampArrayDevice> action)

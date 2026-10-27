@@ -27,6 +27,7 @@ internal enum ShareMode
 internal static class CoreAudio
 {
     public const uint DeviceStateActive = 0x1;
+    public const uint DeviceStateActiveOrDisabled = 0x3;
     public const uint ClsctxAll = 0x17;
     public const uint StreamFlagsEventCallback = 0x00040000;
     public const uint BufferFlagsSilent = 0x2;
@@ -37,6 +38,10 @@ internal static class CoreAudio
     public static readonly Guid IidAudioCaptureClient = new("C8ADBD64-E71E-48A0-A4DE-185C395CD317");
 
     static readonly PropertyKey FriendlyNameKey = new(new Guid("a45c254e-df1c-4efd-8020-67d146a850e0"), 14);
+    // The endpoint's own name, e.g. "CABLE Input"; the friendly name adds the device in parentheses.
+    static readonly PropertyKey DescriptionKey = new(new Guid("a45c254e-df1c-4efd-8020-67d146a850e0"), 2);
+    // The device the endpoint belongs to, e.g. "VB-Audio Virtual Cable"; unaffected by renaming.
+    static readonly PropertyKey InterfaceNameKey = new(new Guid("026e516e-b814-414b-83cd-856d6fef4822"), 2);
 
     public static IMMDeviceEnumerator CreateEnumerator() => (IMMDeviceEnumerator)new MMDeviceEnumeratorComObject();
 
@@ -50,10 +55,67 @@ internal static class CoreAudio
         }
     }
 
-    public static string FriendlyName(IMMDevice device)
+    /// <summary>Active and disabled endpoints with their own name and their device's name.</summary>
+    public static List<(string Id, string Description, string Interface, bool Active)> AllEndpoints(DataFlow flow)
     {
-        var store = device.OpenPropertyStore(0);
-        var key = FriendlyNameKey;
+        var enumerator = CreateEnumerator();
+        try
+        {
+            var devices = enumerator.EnumAudioEndpoints(flow, DeviceStateActiveOrDisabled);
+            var result = new List<(string, string, string, bool)>();
+            for (uint i = 0; i < devices.GetCount(); i++)
+            {
+                var device = devices.Item(i);
+                var store = device.OpenPropertyStore(0);
+                result.Add((device.GetId(), StringProperty(store, DescriptionKey), StringProperty(store, InterfaceNameKey),
+                    device.GetState() == DeviceStateActive));
+            }
+            return result;
+        }
+        finally
+        {
+            Marshal.ReleaseComObject(enumerator);
+        }
+    }
+
+    /// <summary>
+    /// Enables or disables an endpoint, as "Disable" in the Sound control panel does. A disabled
+    /// endpoint disappears from every device list, including the taskbar's output picker.
+    /// </summary>
+    public static void SetEnabled(string deviceId, bool enabled)
+    {
+        var policy = (IPolicyConfig)new PolicyConfigComObject();
+        try
+        {
+            policy.SetEndpointVisibility(deviceId, enabled ? 1 : 0);
+        }
+        finally
+        {
+            Marshal.ReleaseComObject(policy);
+        }
+    }
+
+    /// <summary>Renames an endpoint, as the Sound control panel's General tab does.</summary>
+    public static void Rename(string deviceId, string name)
+    {
+        var policy = (IPolicyConfig)new PolicyConfigComObject();
+        var key = DescriptionKey;
+        var value = new PropVariant { VarType = 31 /* VT_LPWSTR */, Pointer = Marshal.StringToCoTaskMemUni(name) };
+        try
+        {
+            policy.SetPropertyValue(deviceId, 0, ref key, ref value);
+        }
+        finally
+        {
+            PropVariantClear(ref value);
+            Marshal.ReleaseComObject(policy);
+        }
+    }
+
+    public static string FriendlyName(IMMDevice device) => StringProperty(device.OpenPropertyStore(0), FriendlyNameKey);
+
+    static string StringProperty(IPropertyStore store, PropertyKey key)
+    {
         store.GetValue(ref key, out var value);
         try
         {
@@ -148,14 +210,15 @@ internal static class CoreAudio
         return (IAudioClient3)device.Activate(ref iid, ClsctxAll, IntPtr.Zero);
     }
 
+    /// <summary>Makes the device the default for every role, communications (voice chat) included.</summary>
     public static void SetDefaultEndpoint(string deviceId)
     {
         var policy = (IPolicyConfig)new PolicyConfigComObject();
         try
         {
-            // Communications is left alone so voice apps keep the headset itself.
             policy.SetDefaultEndpoint(deviceId, Role.Console);
             policy.SetDefaultEndpoint(deviceId, Role.Multimedia);
+            policy.SetDefaultEndpoint(deviceId, Role.Communications);
         }
         finally
         {
@@ -312,7 +375,7 @@ internal interface IPolicyConfig
     void GetShareMode();
     void SetShareMode();
     void GetPropertyValue();
-    void SetPropertyValue();
+    void SetPropertyValue([MarshalAs(UnmanagedType.LPWStr)] string deviceId, int fxStore, ref PropertyKey key, ref PropVariant value);
     void SetDefaultEndpoint([MarshalAs(UnmanagedType.LPWStr)] string deviceId, Role role);
-    void SetEndpointVisibility();
+    void SetEndpointVisibility([MarshalAs(UnmanagedType.LPWStr)] string deviceId, int visible);
 }

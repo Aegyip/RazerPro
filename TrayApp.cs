@@ -109,7 +109,7 @@ internal sealed class TrayApp : ApplicationContext
         _surround = new SurroundController(_ui);
         _surround.Changed += SyncMenu;
         _surroundEnabled = new ToolStripMenuItem("Açık", null, (_, _) => ToggleSurround());
-        _surroundExclusive = new ToolStripMenuItem("Özel mod (en düşük gecikme)", null,
+        _surroundExclusive = new ToolStripMenuItem("Özel mod: en düşük gecikme (kulaklığa doğrudan çalanlar susar)", null,
             (_, _) => ChangeSurround(s => s.SurroundExclusive = !s.SurroundExclusive));
         BuildSurroundMenu();
 
@@ -526,13 +526,41 @@ internal sealed class TrayApp : ApplicationContext
 
     static string Truncate(string text, int length) => text.Length <= length ? text : text[..length];
 
+    /// <summary>
+    /// The user's own tray picture, if they put one at %APPDATA%\BarracudaTray\icon.png. The app
+    /// ships no logo of its own; the lighting and connection state is then shown as a corner badge.
+    /// </summary>
+    static readonly Lazy<Image?> CustomIcon = new(() =>
+    {
+        var path = Path.Combine(Path.GetDirectoryName(AppLog.FilePath)!, "icon.png");
+        try
+        {
+            if (!File.Exists(path))
+                return null;
+            // Copied out of the stream so the file is not kept locked.
+            using var file = Image.FromFile(path);
+            return new Bitmap(file);
+        }
+        catch (Exception ex) when (ex is IOException or OutOfMemoryException or ArgumentException)
+        {
+            AppLog.Write($"icon.png okunamadı: {ex.Message}");
+            return null;
+        }
+    });
+
     Icon DrawIcon(bool connected)
     {
         using var bitmap = new Bitmap(32, 32);
         using (var g = Graphics.FromImage(bitmap))
         {
             g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.InterpolationMode = InterpolationMode.HighQualityBicubic;
             var bounds = new Rectangle(3, 3, 26, 26);
+            if (CustomIcon.Value is { } picture)
+            {
+                g.DrawImage(picture, new Rectangle(0, 0, 32, 32));
+                bounds = new Rectangle(20, 20, 11, 11);
+            }
             if (_settings.Autonomous || (_settings.Enabled && _settings.Effect == LightingEffect.Spectrum))
             {
                 for (var i = 0; i < 6; i++)
@@ -548,10 +576,10 @@ internal sealed class TrayApp : ApplicationContext
                 using var fill = new SolidBrush(Color.FromArgb(c.R, c.G, c.B));
                 g.FillEllipse(fill, bounds);
             }
-            using var ring = new Pen(connected ? Color.White : Color.DimGray, 3);
+            using var ring = new Pen(connected ? Color.White : Color.DimGray, CustomIcon.Value is null ? 3 : 1.5f);
             g.DrawEllipse(ring, bounds);
             if (!connected)
-                g.DrawLine(ring, 7, 25, 25, 7);
+                g.DrawLine(ring, bounds.Left + 3, bounds.Bottom - 3, bounds.Right - 3, bounds.Top + 3);
         }
         var handle = bitmap.GetHicon();
         try
