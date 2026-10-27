@@ -174,6 +174,14 @@ internal static class NativeMethods
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool DestroyIcon(IntPtr icon);
 
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool RegisterHotKey(IntPtr window, int id, uint modifiers, uint virtualKey);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool UnregisterHotKey(IntPtr window, int id);
+
     [DllImport("avrt.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     public static extern IntPtr AvSetMmThreadCharacteristicsW(string taskName, ref uint taskIndex);
 

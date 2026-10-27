@@ -96,6 +96,31 @@ internal static class CoreAudio
         }
     }
 
+    /// <summary>
+    /// Flips a capture endpoint's mute and returns the new state. On the headset this becomes the
+    /// USB Audio Class mute request Synapse sends, and the headset mirrors it in its mic-mute event.
+    /// </summary>
+    public static bool ToggleMute(string deviceId)
+    {
+        var enumerator = CreateEnumerator();
+        var device = enumerator.GetDevice(deviceId);
+        var iid = new Guid("5CDF2C82-841E-4546-9722-0CF74078229A");
+        var volume = (IAudioEndpointVolume)device.Activate(ref iid, ClsctxAll, IntPtr.Zero);
+        try
+        {
+            var context = Guid.Empty;
+            var mute = !volume.GetMute();
+            volume.SetMute(mute, ref context);
+            return mute;
+        }
+        finally
+        {
+            Marshal.ReleaseComObject(volume);
+            Marshal.ReleaseComObject(device);
+            Marshal.ReleaseComObject(enumerator);
+        }
+    }
+
     public static IAudioClient3 Activate(IMMDevice device)
     {
         var iid = IidAudioClient3;
@@ -210,6 +235,26 @@ internal interface IAudioClient3
     void GetSharedModeEnginePeriod(IntPtr format, out uint defaultPeriod, out uint fundamentalPeriod, out uint minPeriod, out uint maxPeriod);
     void GetCurrentSharedModeEnginePeriod(out IntPtr format, out uint currentPeriod);
     void InitializeSharedAudioStream(uint streamFlags, uint periodInFrames, IntPtr format, IntPtr audioSessionGuid);
+}
+
+[ComImport, Guid("5CDF2C82-841E-4546-9722-0CF74078229A"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+internal interface IAudioEndpointVolume
+{
+    void RegisterControlChangeNotify(IntPtr notify);
+    void UnregisterControlChangeNotify(IntPtr notify);
+    uint GetChannelCount();
+    void SetMasterVolumeLevel(float levelDb, ref Guid context);
+    void SetMasterVolumeLevelScalar(float level, ref Guid context);
+    float GetMasterVolumeLevel();
+    float GetMasterVolumeLevelScalar();
+    void SetChannelVolumeLevel(uint channel, float levelDb, ref Guid context);
+    void SetChannelVolumeLevelScalar(uint channel, float level, ref Guid context);
+    float GetChannelVolumeLevel(uint channel);
+    float GetChannelVolumeLevelScalar(uint channel);
+    void SetMute([MarshalAs(UnmanagedType.Bool)] bool mute, ref Guid context);
+
+    [return: MarshalAs(UnmanagedType.Bool)]
+    bool GetMute();
 }
 
 [ComImport, Guid("C02216F6-8C67-4B5B-9D00-D008E73E0064"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]

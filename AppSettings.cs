@@ -23,6 +23,8 @@ internal sealed class AppSettings
     public bool Surround { get; set; }
     public string SurroundProfile { get; set; } = "razer";
     public bool SurroundExclusive { get; set; } = true;
+    public bool Notifications { get; set; } = true;
+    public Dictionary<string, HeadsetProfile> Profiles { get; set; } = [];
 
     public static AppSettings Load()
     {
@@ -53,4 +55,22 @@ internal sealed class AppSettings
     public LampColor LampColor => LampColor.TryParse(Color, out var c) ? c : new LampColor(0x44, 0xD6, 0x2C);
 
     public LightingState ToState() => new(Enabled, LampColor, Math.Clamp(Brightness, 0, 100), Effect, Autonomous);
+}
+
+/// <summary>A saved combination of lighting, 7.1 and headset sound settings.</summary>
+internal sealed class HeadsetProfile
+{
+    public bool Enabled { get; set; }
+    public string Color { get; set; } = "#44D62C";
+    public int Brightness { get; set; }
+    public LightingEffect Effect { get; set; }
+    public bool Autonomous { get; set; }
+    public bool Surround { get; set; }
+    public string SurroundProfile { get; set; } = "razer";
+
+    // Headset settings are left out (null) when they were unknown at save time.
+    public Headset.EqPreset? Eq { get; set; }
+    public sbyte[]? EqCurve { get; set; }
+    public bool? SidetoneOn { get; set; }
+    public int? SidetoneLevel { get; set; }
 }

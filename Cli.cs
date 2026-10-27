@@ -38,8 +38,12 @@ internal static class Cli
                     return WithDevice(d => Console.WriteLine($"<- {Convert.ToHexString(d.ReadFeature(reportId))}"));
                 case "--get" when args.Length > 1 && byte.TryParse(args[1], System.Globalization.NumberStyles.HexNumber, null, out var property):
                     return Get((HeadsetProperty)property);
+                case "--set" when args.Length > 2 && byte.TryParse(args[1], System.Globalization.NumberStyles.HexNumber, null, out var setProperty):
+                    return Get((HeadsetProperty)setProperty, Convert.FromHexString(args[2]));
                 case "--devices":
                     return Devices();
+                case "--status":
+                    return Status();
                 case "--meters":
                     return Meters(args.Length > 1 && int.TryParse(args[1], out var meterSeconds) ? meterSeconds : 5);
                 case "--selftest":
@@ -146,8 +150,11 @@ internal static class Cli
         return 0;
     }
 
-    /// <summary>Requests one vendor property. Only 0x21 and 0x2A are known to be safe to ask for.</summary>
-    static int Get(HeadsetProperty property)
+    /// <summary>
+    /// Requests (or, with <paramref name="value"/>, writes) one vendor property. Only properties
+    /// Synapse itself reads and writes are safe; an unknown request once wedged the dongle.
+    /// </summary>
+    static int Get(HeadsetProperty property, byte[]? value = null)
     {
         using var channel = RazerVendorChannel.Open(LightingEngine.VendorId, LightingEngine.ProductId);
         if (channel is null)
@@ -156,14 +163,17 @@ internal static class Cli
             return 1;
         }
         using var answered = new ManualResetEventSlim();
-        channel.PropertyReceived += (p, v) =>
+        channel.PropertyReceived += (p, data) =>
         {
-            Console.WriteLine($"<- {p} (0x{(byte)p:X2}) = 0x{v:X2} ({v})");
+            Console.WriteLine($"<- {p} (0x{(byte)p:X2}) = {Convert.ToHexString(data)} ({string.Join(" ", data.Select(b => (sbyte)b))})");
             if (p == property)
                 answered.Set();
         };
         channel.Start();
-        if (!channel.Request(property, TimeSpan.FromSeconds(1)))
+        var sent = value is null
+            ? channel.Request(property, TimeSpan.FromSeconds(1))
+            : channel.Set(property, value, TimeSpan.FromSeconds(1));
+        if (!sent)
         {
             Console.WriteLine("The dongle did not accept the request");
             return 1;
@@ -196,6 +206,17 @@ internal static class Cli
             }
         }
         return 0;
+    }
+
+    /// <summary>Runs the headset monitor for a few seconds and prints what it learned.</summary>
+    static int Status()
+    {
+        using var monitor = new HeadsetMonitor();
+        Thread.Sleep(TimeSpan.FromSeconds(5));
+        var s = monitor.Status;
+        Console.WriteLine($"dongle={s.DonglePresent} linked={s.Linked} battery={s.Battery} charging={s.Charging} mic muted={s.MicMuted}");
+        Console.WriteLine($"eq={s.Eq} curve=[{string.Join(" ", s.EqCurve ?? [])}] sidetone on={s.SidetoneOn} level={s.SidetoneLevel} power saving={s.PowerSavingMinutes} min");
+        return s.Linked == true ? 0 : 1;
     }
 
     /// <summary>Prints the default playback device and every playback device's peak level, to see where sound goes.</summary>
