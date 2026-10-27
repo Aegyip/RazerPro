@@ -321,6 +321,39 @@ internal interface IAudioClient3
     void InitializeSharedAudioStream(uint streamFlags, uint periodInFrames, IntPtr format, IntPtr audioSessionGuid);
 }
 
+[ComImport, Guid("77AA99A0-1BD6-484F-8BC7-2C654C9A9B6F"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+internal interface IAudioSessionManager2
+{
+    void GetAudioSessionControl();
+    void GetSimpleAudioVolume();
+    IAudioSessionEnumerator GetSessionEnumerator();
+}
+
+[ComImport, Guid("E2F5BB11-0570-40CA-ACDD-3AA01277DEE8"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+internal interface IAudioSessionEnumerator
+{
+    int GetCount();
+    IAudioSessionControl2 GetSession(int index);
+}
+
+/// <summary>IAudioSessionControl and IAudioSessionControl2 in one vtable.</summary>
+[ComImport, Guid("BFB7FF88-7239-4FC9-8FA2-07C950BE9C6D"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+internal interface IAudioSessionControl2
+{
+    int GetState();
+    void GetDisplayName();
+    void SetDisplayName();
+    void GetIconPath();
+    void SetIconPath();
+    void GetGroupingParam();
+    void SetGroupingParam();
+    void RegisterAudioSessionNotification();
+    void UnregisterAudioSessionNotification();
+    void GetSessionIdentifier();
+    void GetSessionInstanceIdentifier();
+    uint GetProcessId();
+}
+
 [ComImport, Guid("5CDF2C82-841E-4546-9722-0CF74078229A"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
 internal interface IAudioEndpointVolume
 {

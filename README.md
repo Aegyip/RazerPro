@@ -79,7 +79,8 @@ VB-CABLE kurulduğunda Windows onu stereo olarak ayarlıyor. 7.1 açılınca uyg
 - **Chroma kulaklığın içinde kapatılabiliyor.** SmartSwitch'e 3 kez basmak açıp kapatıyor. Kapalıyken bilgisayardan gönderilen hiçbir renk görünmüyor.
 - **Desteklenmeyen bir özelliği sormak dongle'ı kilitliyor.** `0x20` sorgusundan sonra dongle hiçbir output report'u kabul etmedi; çıkarıp takmak gerekti. Yalnızca yukarıdaki tablodaki özellikler soruluyor; her yazma 1 saniyelik zaman aşımıyla iptal edilebiliyor.
 - **Yazma onayı değer değildir.** Kulaklık bir yazmayı `özellik | 0x80` kimliğiyle ve `00` durum byte'ıyla onaylıyor; uygulama bu onayları değer olarak okumuyor, yazdıktan sonra özelliği yeniden soruyor.
-- **Uygulamaya sabitlenmiş ses cihazları 7.1'i atlar.** Windows bazı uygulamaları belirli bir cihaza sabitleyebiliyor (Ayarlar → Ses → Ses karıştırıcısı). Bu uygulamalar varsayılan cihaz değişince CABLE'a geçmez; özel mod açıkken kulaklığa da ulaşamaz. Ses karıştırıcısındaki **Sıfırla** düğmesi bu sabitlemeleri kaldırır.
+- **Kulaklığı doğrudan seçen uygulamalar özel modda susar.** 7.1 açıkken bütün varsayılan roller (iletişim dahil) Barracuda 7.1'e geçer, ama bir uygulamanın kendi ayarında doğrudan "Razer Barracuda X Chroma" seçiliyse ses oraya gider ve özel mod onu engeller. Discord'da Ayarlar → Ses ve Görüntü → **Konuşmacı: Windows Varsayılanı** seçilmeli; mikrofon da Windows Varsayılanı kalmalı ("VB-Audio Virtual Cable" asla mikrofon seçilmemeli). Ya da menüden özel mod kapatılır: her uygulama duyulur, gecikme ~38 ms olur (kulaklık paylaşımlı modda yalnızca 10 ms periyot destekliyor). `--sessions 10` hangi uygulamanın hangi cihaza çaldığını gösterir.
+- **7.1 açılınca Discord "Sesi VB-Audio Virtual Cable olarak değiştir?" diye sorar.** CABLE cihazları 7.1 açılırken etkinleştirildiği için Discord bunu yeni takılmış bir cihaz sanıyor. Pencere X ile kapatılmalı; "Giriş + Çıkışı değiştir" Discord'un mikrofonunu da kabloya çevirir.
 - **Razer uygulamaları arka planda çalışıyorsa** Synapse ışıkları yönetir, Razer'ın 7.1 cihazı da uygulamaları kendine sabitleyebilir. Razer uygulamalarını kaldırın.
 - **Windows Dinamik Aydınlatma** bu cihazda açıksa çakışabilir. Ayarlar → Kişiselleştirme → Dinamik Aydınlatma bölümünden kulaklık için kapatın.
 
@@ -113,6 +114,8 @@ BarracudaTray.exe --get 13          # vendor özelliği sor (yalnızca tablodaki
 BarracudaTray.exe --set 13 07       # vendor özelliği yaz (yalnızca tablodakiler)
 BarracudaTray.exe --devices         # ses cihazları, formatları ve özel modda desteklenenler
 BarracudaTray.exe --meters 10       # hangi ses cihazından ses geçtiğini 10 sn göster
+BarracudaTray.exe --sessions 10     # hangi uygulama hangi cihaza çalıyor, ne kadar yüksek
+BarracudaTray.exe --surround 5 razer tone  # CABLE'a test tonu çalıp motorun giriş/çıkış seviyesini ölç
 BarracudaTray.exe --selftest razer  # konvolüsyonu bir profile karşı doğrula
 BarracudaTray.exe --surround 10     # 7.1 motorunu 10 sn çalıştır, gecikme dökümünü yazdır (shared: paylaşımlı mod)
 ```

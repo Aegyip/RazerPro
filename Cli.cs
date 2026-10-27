@@ -52,6 +52,8 @@ internal static class Cli
                     return 0;
                 case "--endpoint-enable" when args.Length > 2:
                     return EndpointEnable(args[1], args[2] != "off");
+                case "--sessions":
+                    return Sessions(args.Length > 1 && int.TryParse(args[1], out var sessionSeconds) ? sessionSeconds : 5);
                 case "--meters":
                     return Meters(args.Length > 1 && int.TryParse(args[1], out var meterSeconds) ? meterSeconds : 5);
                 case "--selftest":
@@ -256,6 +258,49 @@ internal static class Cli
         Console.WriteLine($"dongle={s.DonglePresent} linked={s.Linked} battery={s.Battery} charging={s.Charging} mic muted={s.MicMuted}");
         Console.WriteLine($"eq={s.Eq} curve=[{string.Join(" ", s.EqCurve ?? [])}] sidetone on={s.SidetoneOn} level={s.SidetoneLevel} power saving={s.PowerSavingMinutes} min");
         return s.Linked == true ? 0 : 1;
+    }
+
+    /// <summary>Which app plays to which playback device, and how loud, over a few seconds.</summary>
+    static int Sessions(int seconds)
+    {
+        var enumerator = CoreAudio.CreateEnumerator();
+        foreach (var role in new[] { Role.Multimedia, Role.Communications })
+            Console.WriteLine($"Default ({role}): {CoreAudio.FriendlyName(enumerator.GetDefaultAudioEndpoint(DataFlow.Render, role))}");
+
+        var peaks = new Dictionary<string, float>();
+        var states = new Dictionary<string, int>();
+        for (var tick = 0; tick < seconds * 10; tick++)
+        {
+            foreach (var (id, name) in CoreAudio.Endpoints(enumerator, DataFlow.Render))
+            {
+                var iid = new Guid("77AA99A0-1BD6-484F-8BC7-2C654C9A9B6F");
+                var manager = (IAudioSessionManager2)enumerator.GetDevice(id).Activate(ref iid, CoreAudio.ClsctxAll, IntPtr.Zero);
+                var sessions = manager.GetSessionEnumerator();
+                for (var i = 0; i < sessions.GetCount(); i++)
+                {
+                    var session = sessions.GetSession(i);
+                    var pid = session.GetProcessId();
+                    string process;
+                    try
+                    {
+                        process = pid == 0 ? "system sounds" : System.Diagnostics.Process.GetProcessById((int)pid).ProcessName;
+                    }
+                    catch (ArgumentException)
+                    {
+                        process = $"pid {pid}";
+                    }
+                    var key = $"{name[..Math.Min(36, name.Length)],-36} {process}";
+                    var peak = ((IAudioMeterInformation)session).GetPeakValue();
+                    peaks[key] = Math.Max(peaks.GetValueOrDefault(key), peak);
+                    states[key] = Math.Max(states.GetValueOrDefault(key), session.GetState());
+                }
+            }
+            Thread.Sleep(100);
+        }
+        Console.WriteLine("device                               app  (state: 0 inactive, 1 active, 2 expired)  peak");
+        foreach (var (key, peak) in peaks.OrderBy(p => p.Key))
+            Console.WriteLine($"  {key}  state {states[key]}  peak {peak:F3}");
+        return 0;
     }
 
     /// <summary>Prints the default playback device and every playback device's peak level, to see where sound goes.</summary>
