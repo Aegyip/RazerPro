@@ -66,6 +66,8 @@ internal static class Cli
                     return Sessions(args.Length > 1 && int.TryParse(args[1], out var sessionSeconds) ? sessionSeconds : 5);
                 case "--meters":
                     return Meters(args.Length > 1 && int.TryParse(args[1], out var meterSeconds) ? meterSeconds : 5);
+                case "--response":
+                    return Response(args.Length > 1 ? args[1] : "razer");
                 case "--bench":
                     return Bench(args.Length > 1 ? args[1] : "razer");
                 case "--selftest":
@@ -380,6 +382,41 @@ internal static class Cli
         return supported.Count > 0 ? string.Join(" ", supported) : "none";
     }
 
+    /// <summary>Frequency response of a profile before and after tone correction, in dB.</summary>
+    static int Response(string profile)
+    {
+        int[] hz = [30, 60, 120, 250, 500, 1000, 2000, 4000, 8000, 12000, 16000];
+        static double Db(ReadOnlySpan<float> ir, int f)
+        {
+            double re = 0, im = 0;
+            for (var t = 0; t < ir.Length; t++)
+            {
+                var a = 2 * Math.PI * f * t / HrirSet.SampleRate;
+                re += ir[t] * Math.Cos(a);
+                im -= ir[t] * Math.Sin(a);
+            }
+            return 20 * Math.Log10(Math.Max(Math.Sqrt(re * re + im * im), 1e-9));
+        }
+        static float[] Sum(ReadOnlySpan<float> a, ReadOnlySpan<float> b)
+        {
+            var s = new float[a.Length];
+            for (var i = 0; i < s.Length; i++)
+                s[i] = a[i] + b[i];
+            return s;
+        }
+
+        var raw = HrirSet.Load(HrirLibrary.PathOf(profile));
+        Console.WriteLine($"{"Hz",-22}{string.Join("", hz.Select(f => $"{f,7}"))}");
+        foreach (var (label, set) in new[] { ("original", raw), ("corrected", HrirEqualizer.Flatten(raw)) })
+        {
+            var both = Sum(set.Left(VirtualSpeaker.FrontLeft), set.Left(VirtualSpeaker.FrontRight));
+            Console.WriteLine($"{label + " L=R",-22}{string.Join("", hz.Select(f => $"{Db(both, f),7:F1}"))}");
+            Console.WriteLine($"{label + " left only",-22}{string.Join("", hz.Select(f => $"{Db(set.Left(VirtualSpeaker.FrontLeft), f),7:F1}"))}");
+            Console.WriteLine($"{label + " back left",-22}{string.Join("", hz.Select(f => $"{Db(set.Left(VirtualSpeaker.BackLeft), f),7:F1}"))}");
+        }
+        return 0;
+    }
+
     /// <summary>How much of one core the convolution alone needs for real-time 48 kHz audio.</summary>
     static int Bench(string profile)
     {
@@ -449,7 +486,7 @@ internal static class Cli
             Console.WriteLine(source is null ? "VB-CABLE not installed" : "Headset audio device not found");
             return 1;
         }
-        using var engine = new SurroundEngine(source, target, HrirSet.Load(HrirLibrary.PathOf(profile)));
+        using var engine = new SurroundEngine(source, target, HrirEqualizer.Flatten(HrirSet.Load(HrirLibrary.PathOf(profile))));
         var failed = false;
         engine.Failed += message =>
         {

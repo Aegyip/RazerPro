@@ -30,7 +30,7 @@ internal sealed class SurroundController : IDisposable
     readonly SynchronizationContext _ui;
     readonly System.Windows.Forms.Timer _retry = new() { Interval = 3000 };
     SurroundEngine? _engine;
-    (bool Enabled, string Profile) _wanted;
+    (bool Enabled, string Profile, bool ToneCorrection) _wanted;
     bool _ownsDefault;
     string _problem = "";
 
@@ -76,9 +76,10 @@ internal sealed class SurroundController : IDisposable
         : _engine is { } engine ? $"≈ {engine.LatencyMs:F0} ms · {engine.Mode}"
         : "Kapalı";
 
-    public void Apply(bool enabled, string profile)
+    /// <param name="toneCorrection">Flatten the profile's front response (see <see cref="HrirEqualizer"/>).</param>
+    public void Apply(bool enabled, string profile, bool toneCorrection)
     {
-        _wanted = (enabled, profile);
+        _wanted = (enabled, profile, toneCorrection);
         Restart();
     }
 
@@ -150,6 +151,8 @@ internal sealed class SurroundController : IDisposable
         try
         {
             hrir = HrirSet.Load(HrirLibrary.PathOf(_wanted.Profile));
+            if (_wanted.ToneCorrection)
+                hrir = HrirEqualizer.Flatten(hrir);
         }
         catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException)
         {
@@ -185,7 +188,8 @@ internal sealed class SurroundController : IDisposable
             }, null);
             _engine = engine;
             engine.Start();
-            AppLog.Write($"7.1 açıldı: profil {_wanted.Profile}, CABLE {(sevenOne ? "7.1" : "stereo")}");
+            AppLog.Write($"7.1 açıldı: profil {_wanted.Profile}{(_wanted.ToneCorrection ? " (ton dengeli)" : "")}, " +
+                $"CABLE {(sevenOne ? "7.1" : "stereo")}");
 
             if (!sevenOne)
                 _problem = $"Oyunlar şu an stereo gönderiyor: {SurroundDeviceName} 7.1 yapılamadı";

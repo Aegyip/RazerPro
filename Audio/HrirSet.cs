@@ -53,6 +53,25 @@ internal sealed class HrirSet
         }
     }
 
+    HrirSet(string name, float[][] left, float[][] right)
+    {
+        Name = name;
+        Length = left[0].Length;
+        _left = left;
+        _right = right;
+    }
+
+    /// <summary>
+    /// The same set with every impulse response passed through <paramref name="transform"/>, which
+    /// must return equally long arrays. Responses shared through mirroring are transformed once.
+    /// </summary>
+    public HrirSet Map(Func<float[], float[]> transform)
+    {
+        var done = new Dictionary<float[], float[]>(ReferenceEqualityComparer.Instance);
+        float[] Once(float[] ir) => done.TryGetValue(ir, out var mapped) ? mapped : done[ir] = transform(ir);
+        return new HrirSet(Name, _left.Select(Once).ToArray(), _right.Select(Once).ToArray());
+    }
+
     public ReadOnlySpan<float> Left(VirtualSpeaker speaker) => _left[(int)speaker];
     public ReadOnlySpan<float> Right(VirtualSpeaker speaker) => _right[(int)speaker];
 

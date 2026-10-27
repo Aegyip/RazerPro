@@ -72,6 +72,7 @@ internal sealed class TrayApp : ApplicationContext
     readonly ToolStripMenuItem _surroundMenu = new("7.1 Surround");
     readonly ToolStripMenuItem _surroundEnabled;
     readonly ToolStripMenuItem _surroundStatus = new() { Enabled = false };
+    readonly ToolStripMenuItem _toneCorrection;
     readonly List<ToolStripMenuItem> _hrirItems = [];
 
     readonly ToolStripMenuItem _soundMenu = new("Kulaklık sesi");
@@ -111,6 +112,8 @@ internal sealed class TrayApp : ApplicationContext
         _surround = new SurroundController(_ui);
         _surround.Changed += SyncMenu;
         _surroundEnabled = new ToolStripMenuItem("Açık", null, (_, _) => ToggleSurround());
+        _toneCorrection = new ToolStripMenuItem("Ton dengeleme (boğukluğu giderir)", null,
+            (_, _) => ChangeSurround(s => s.SurroundToneCorrection = !s.SurroundToneCorrection));
         BuildSurroundMenu();
 
         _micMute = new ToolStripMenuItem("Mikrofonu sustur", null, (_, _) => ToggleMicMute());
@@ -170,7 +173,7 @@ internal sealed class TrayApp : ApplicationContext
 
         _engine = new LightingEngine(_settings.ToState());
         _headset.StatusChanged += _ => _ui.Post(_ => OnHeadsetChanged(), null);
-        _surround.Apply(_settings.Surround, _settings.SurroundProfile);
+        _surround.Apply(_settings.Surround, _settings.SurroundProfile, _settings.SurroundToneCorrection);
 
         try
         {
@@ -311,6 +314,7 @@ internal sealed class TrayApp : ApplicationContext
                 all.DropDownItems.Add(item);
             }
             _surroundMenu.DropDownItems.Add(all);
+            _surroundMenu.DropDownItems.AddRange([new ToolStripSeparator(), _toneCorrection]);
         }
     }
 
@@ -320,7 +324,7 @@ internal sealed class TrayApp : ApplicationContext
     {
         change(_settings);
         _settings.Save();
-        _surround.Apply(_settings.Surround, _settings.SurroundProfile);
+        _surround.Apply(_settings.Surround, _settings.SurroundProfile, _settings.SurroundToneCorrection);
         SyncMenu();
     }
 
@@ -531,6 +535,7 @@ internal sealed class TrayApp : ApplicationContext
         _surroundStatus.Text = $"Durum: {_surround.Status}";
         foreach (var item in _hrirItems)
             item.Checked = item.Tag as string == _settings.SurroundProfile;
+        _toneCorrection.Checked = _settings.SurroundToneCorrection;
         _surroundMenu.Text = _settings.Surround ? "7.1 Surround · açık" : "7.1 Surround";
 
         // Headset settings only exist while the headset is reachable.

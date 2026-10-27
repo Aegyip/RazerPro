@@ -72,7 +72,9 @@ oyun ─7.1─► CABLE Input ══ VB-CABLE ══► CABLE Output ─► moto
 - Motor, 7.1 sesi HeSuVi profiliyle iki kulağa çevirir. Kanal düzeni ve karıştırma kuralları HeSuVi'nin kaynak kodundan alındı: LFE 111 Hz'de kesilip merkeze eklenir, 7 kanallı profillerde sağ taraf solun aynasıdır. Equalizer APO gerekmez.
 - Gecikme için: 128 örneklik bölümlenmiş FFT konvolüsyonu (2,7 ms), iki kulak tek ters FFT'de; VB-CABLE'ın kayıt tarafı **özel modda** 8 kanal olarak 3 ms periyotla okunur (Windows'taki kayıt formatı ayarı önemsizdir). Kulaklığa **paylaşımlı modda** yazılır ve her 3 ms'de bir beslenir; kulaklık tamponunda iki Windows periyodu (20 ms) tutulur, ara kuyruk ~0'da kalır. Ölçülen: ~23 ms sabit, kulaklığa saniyede tam 48 000 örnek, 60 sn'de açılıştaki tek kesinti dışında kesinti yok, tek çekirdeğin ~%5'i. Oyunun CABLE'a yazarkenki Windows gecikmesi (~10 ms) buna dahil değildir; o her sanal 7.1 çözümünde vardır.
 - **Kulaklığa özel modda yazılmaz.** USB sürücüsü özel modu kabul ediyor ama uygulamayı yeterince sık uyandırmıyor: 3 ms periyotta saniyede 18 000, 10 ms periyotta 32 000 örnek gidiyor (48 000 gerekirken), yani ses sürekli kesiliyor. Paylaşımlı mod bunu yaşamıyor ve kulaklığa doğrudan çalan uygulamaları (Discord gibi) da susturmuyor.
-- VB-CABLE ile kulaklığın saatleri tam aynı değil (~110 ppm). Kuyruk iki bloğu aşınca her beslemede bir örnek atlanır; gecikme büyümez, atlama duyulmaz. Açılıştan sonraki kesintiler `log.txt`'ye yazılır.
+- VB-CABLE ile kulaklığın saatleri tam aynı değil (~110 ppm). Kuyruk iki bloğu aşınca en fazla ~20 kez/sn bir örnek komşusuyla birleştirilir; gecikme büyümez, atlama duyulmaz. Açılıştan sonraki kesintiler `log.txt`'ye yazılır.
+- **Ton dengeleme** (varsayılan açık, 7.1 menüsünden kapatılabilir): Profillerin ön hoparlör tepkisi, iki kanalda benzer olan seste (müziğin ve oyun sesinin çoğu) düz değil; "razer" profilinde 120–250 Hz +3 dB, 1–2 kHz −6,5 dB, 8–12 kHz −6 dB, yani boğuk ve kısık. Bu tepkiyi düzleyen tek bir minimum faz düzeltme filtresi (1024 örnek, ±9/−12 dB sınırlı, 1/3 oktav yumuşatılmış) bütün yanıtlara uygulanır; yönler arasındaki farklar (surround ipuçları) korunur, gecikme eklenmez. Sonuç: 60 Hz–16 kHz arası ±1,2 dB. `--response razer` öncesini ve sonrasını gösterir.
+- **Sınırlayıcı:** Yedi sanal hoparlörün toplamı yüksek, bas ağırlıklı seste tam ölçeği aşabiliyor (razer'da en kötü durum kazancı 3,8). Sert kırpma yerine kazanç o blokta düşürülüp ~150 ms'de yumuşakça geri getirilir; tavan −0,45 dBFS.
 - Profiller `%APPDATA%\BarracudaTray\hrir` klasöründen okunur (HeSuVi 2.0.0.1 kurulum paketinin `hrir` klasörü, yalnızca 48 kHz dosyalar). Profil dosyaları depoya konmaz.
 
 VB-CABLE kurulduğunda Windows onu stereo olarak ayarlıyor. 7.1 açılınca uygulama **CABLE Input**'u kendisi 7.1 yapar (Ses ayarlarındaki "Gelişmiş" sekmesiyle aynı işlem), elle ayar gerekmez.
@@ -123,6 +125,7 @@ BarracudaTray.exe --surround 5 razer tone  # CABLE'a test tonu çalıp motorun g
 BarracudaTray.exe --selftest razer  # konvolüsyonu bir profile karşı doğrula
 BarracudaTray.exe --surround 10     # 7.1 motorunu 10 sn çalıştır, gecikme ve kulaklığa giden örnek/sn dökümünü yazdır
 BarracudaTray.exe --bench razer     # konvolüsyonun tek başına ne kadar işlemci kullandığı
+BarracudaTray.exe --response razer  # profilin frekans tepkisi, ton dengeleme öncesi ve sonrası
 ```
 
 ## Derleme

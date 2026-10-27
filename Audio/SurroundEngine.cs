@@ -312,15 +312,20 @@ internal sealed class SurroundEngine : IDisposable
 
         /// <summary>
         /// The headset's clock and VB-CABLE's never match exactly (measured about 110 ppm, the cable
-        /// faster), so audio slowly piles up here. Dropping one frame per top-up while more than two
-        /// blocks wait keeps the delay flat without an audible jump. Must run before the amount to
-        /// render is decided, or the dropped frame would be replaced by silence.
+        /// faster, ~5 frames a second), so audio slowly piles up here. While more than two blocks
+        /// wait, one frame is merged into its neighbour at most every 20th top-up (~20 a second, well
+        /// above the drift), which keeps the delay flat without the clicks a bare drop makes. Must
+        /// run before the amount to render is decided, or the merged frame would become silence.
         /// </summary>
         public void TrimDrift()
         {
-            if (_output.Count / 2 > 2 * Block)
-                _output.Discard(2);
+            if (++_topUpsSinceTrim < 20 || _output.Count / 2 <= 2 * Block)
+                return;
+            _output.MergeFirstFrames();
+            _topUpsSinceTrim = 0;
         }
+
+        int _topUpsSinceTrim;
 
         /// <summary>Capture period + one block + what waits here + what waits in the headset's buffer.</summary>
         public double LatencyFrames => _capturePeriod + Block + _queueLevel + _deviceLevel;
@@ -418,12 +423,44 @@ internal sealed class SurroundEngine : IDisposable
             }
 
             _convolver.Process(_speakers, _left, _right);
+            Limit();
             for (var f = 0; f < Block; f++)
             {
                 _stereo[2 * f] = _left[f];
                 _stereo[2 * f + 1] = _right[f];
             }
             _output.Write(_stereo);
+        }
+
+        const float Ceiling = 0.95f;
+        // Gain recovers with a ~150 ms time constant once loud passages are over.
+        static readonly float Release = 1 - MathF.Exp(-Block / (0.15f * HrirSet.SampleRate));
+        float _gain = 1;
+
+        /// <summary>
+        /// Seven virtual speakers summed through the HRIRs can go well past full scale on loud,
+        /// bass-heavy material; hard clipping that was audible as crackle. The gain drops at once for
+        /// a block that would clip and comes back smoothly, ramped across each block so it never steps.
+        /// </summary>
+        void Limit()
+        {
+            var peak = 0f;
+            for (var f = 0; f < Block; f++)
+                peak = Math.Max(peak, Math.Max(Math.Abs(_left[f]), Math.Abs(_right[f])));
+            var start = _gain;
+            var needed = peak * start > Ceiling ? Ceiling / peak : 1f;
+            var end = needed < start ? needed : start + (Math.Min(1f, needed) - start) * Release;
+            if (needed < start)
+                start = needed; // attack within the block, or its first samples would still clip
+            if (start == 1f && end == 1f)
+                return;
+            for (var f = 0; f < Block; f++)
+            {
+                var g = start + (end - start) * f / Block;
+                _left[f] *= g;
+                _right[f] *= g;
+            }
+            _gain = end;
         }
 
         /// <summary>
@@ -553,6 +590,20 @@ internal sealed class SampleFifo(int capacity)
         _data.AsSpan(_read, first).CopyTo(destination);
         _data.AsSpan(0, destination.Length - first).CopyTo(destination[first..]);
         Discard(destination.Length);
+    }
+
+    /// <summary>Replaces the first two stereo frames with their average, so one frame goes without a jump.</summary>
+    public void MergeFirstFrames()
+    {
+        if (Count < 4)
+            return;
+        for (var c = 0; c < 2; c++)
+        {
+            var first = (_read + c) % _data.Length;
+            var second = (_read + 2 + c) % _data.Length;
+            _data[second] = (_data[first] + _data[second]) / 2;
+        }
+        Discard(2);
     }
 
     public void Discard(int count)
