@@ -1,4 +1,5 @@
 using System.Drawing.Drawing2D;
+using BarracudaTray.Audio;
 using BarracudaTray.Headset;
 using BarracudaTray.Interop;
 using BarracudaTray.Lighting;
@@ -22,6 +23,9 @@ internal sealed class TrayApp : ApplicationContext
 
     static readonly int[] BrightnessLevels = [10, 25, 50, 75, 100];
 
+    // Shown at the top of the 7.1 menu; every other HeSuVi profile sits under "Tüm profiller".
+    static readonly string[] FavoriteProfiles = ["razer", "razer_fix", "sonic", "atmos", "dtshx"];
+
     static readonly (string Name, LightingEffect Effect)[] Effects =
     [
         ("Sabit", LightingEffect.Static),
@@ -42,6 +46,12 @@ internal sealed class TrayApp : ApplicationContext
     readonly ToolStripMenuItem _brightness = new("Parlaklık");
     readonly ToolStripMenuItem _effects = new("Efekt");
     readonly ToolStripMenuItem _autonomous;
+    readonly SurroundController _surround;
+    readonly ToolStripMenuItem _surroundMenu = new("7.1 Surround");
+    readonly ToolStripMenuItem _surroundEnabled;
+    readonly ToolStripMenuItem _surroundStatus = new() { Enabled = false };
+    readonly ToolStripMenuItem _surroundExclusive;
+    readonly List<ToolStripMenuItem> _profileItems = [];
     Icon? _icon;
 
     public TrayApp()
@@ -65,6 +75,13 @@ internal sealed class TrayApp : ApplicationContext
 
         _autonomous = new ToolStripMenuItem("Kulaklığın kendi efekti", null, (_, _) => ToggleAutonomous());
 
+        _surround = new SurroundController(_ui);
+        _surround.Changed += SyncMenu;
+        _surroundEnabled = new ToolStripMenuItem("Açık", null, (_, _) => ChangeSurround(s => s.Surround = !s.Surround));
+        _surroundExclusive = new ToolStripMenuItem("Özel mod (en düşük gecikme)", null,
+            (_, _) => ChangeSurround(s => s.SurroundExclusive = !s.SurroundExclusive));
+        BuildSurroundMenu();
+
         menu.Items.AddRange([
             _status,
             _hint,
@@ -76,14 +93,62 @@ internal sealed class TrayApp : ApplicationContext
             new ToolStripSeparator(),
             _autonomous,
             new ToolStripSeparator(),
+            _surroundMenu,
+            new ToolStripSeparator(),
             new ToolStripMenuItem("Çıkış", null, (_, _) => ExitThread()),
         ]);
+
+        // The latency estimate moves on its own, so refresh it whenever the menu is about to show.
+        menu.Opening += (_, _) => _surroundStatus.Text = $"Durum: {_surround.Status}";
 
         _tray = new NotifyIcon { ContextMenuStrip = menu, Visible = true };
         _tray.DoubleClick += (_, _) => Change(s => s.Enabled = !s.Enabled);
 
         _engine = new LightingEngine(_settings.ToState());
         _headset.StatusChanged += _ => _ui.Post(_ => OnHeadsetChanged(), null);
+        _surround.Apply(_settings.Surround, _settings.SurroundProfile, _settings.SurroundExclusive);
+        SyncMenu();
+    }
+
+    void BuildSurroundMenu()
+    {
+        var profiles = HrirLibrary.List();
+        ToolStripMenuItem ProfileItem((string Name, string Description) p) =>
+            new(p.Description, null, (_, _) => ChangeSurround(s => s.SurroundProfile = p.Name)) { Tag = p.Name };
+
+        _surroundMenu.DropDownItems.AddRange([_surroundEnabled, _surroundStatus, new ToolStripSeparator()]);
+        if (profiles.Count == 0)
+        {
+            _surroundMenu.DropDownItems.Add(new ToolStripMenuItem($"Profil yok: {HrirLibrary.Folder}") { Enabled = false });
+        }
+        else
+        {
+            foreach (var name in FavoriteProfiles)
+            {
+                if (profiles.FirstOrDefault(p => p.Name == name) is { Name: not null } favorite)
+                {
+                    var item = ProfileItem(favorite);
+                    _profileItems.Add(item);
+                    _surroundMenu.DropDownItems.Add(item);
+                }
+            }
+            var all = new ToolStripMenuItem("Tüm profiller");
+            foreach (var profile in profiles)
+            {
+                var item = ProfileItem(profile);
+                _profileItems.Add(item);
+                all.DropDownItems.Add(item);
+            }
+            _surroundMenu.DropDownItems.Add(all);
+        }
+        _surroundMenu.DropDownItems.AddRange([new ToolStripSeparator(), _surroundExclusive]);
+    }
+
+    void ChangeSurround(Action<AppSettings> change)
+    {
+        change(_settings);
+        _settings.Save();
+        _surround.Apply(_settings.Surround, _settings.SurroundProfile, _settings.SurroundExclusive);
         SyncMenu();
     }
 
@@ -107,6 +172,7 @@ internal sealed class TrayApp : ApplicationContext
     {
         if (disposing)
         {
+            _surround.Dispose();
             _headset.Dispose();
             _engine.Dispose();
             _tray.Dispose();
@@ -177,6 +243,13 @@ internal sealed class TrayApp : ApplicationContext
             item.Checked = item.Tag is int level && level == _settings.Brightness;
         foreach (var item in _effects.DropDownItems.OfType<ToolStripMenuItem>())
             item.Checked = item.Tag is LightingEffect effect && effect == _settings.Effect;
+
+        _surroundEnabled.Checked = _settings.Surround;
+        _surroundExclusive.Checked = _settings.SurroundExclusive;
+        _surroundStatus.Text = $"Durum: {_surround.Status}";
+        foreach (var item in _profileItems)
+            item.Checked = item.Tag as string == _settings.SurroundProfile;
+        _surroundMenu.Text = _settings.Surround ? "7.1 Surround · açık" : "7.1 Surround";
 
         var state = !connected ? _status.Text
             : _settings.Autonomous ? "kulaklığın efekti"

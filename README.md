@@ -7,7 +7,7 @@ Razer Barracuda X Chroma için hafif bir Windows tray uygulaması. Razer Synapse
 | Faz | İçerik | Durum |
 |---|---|---|
 | 1 | RGB: aç/kapat, renk, parlaklık, Nefes / Gökkuşağı efektleri | ✅ |
-| 2 | 7.1 sanal surround (Equalizer APO + HeSuVi yönetimi) | ⏳ |
+| 2 | 7.1 sanal surround (kendi motoru + HeSuVi profilleri + VB-CABLE) | 🟡 yazıldı, uçtan uca test bekliyor |
 | 3 | Pil, şarj, mikrofon durumu | 🟡 menüde gösteriliyor, bildirimler yok |
 | 4 | EQ, sidetone, Rahatsız Etmeyin, güç tasarrufu | ⏳ |
 | 5 | Profiller, Windows ile başlama, kısayollar | ⏳ |
@@ -22,6 +22,22 @@ Kulaklığın ışıkları standart **HID LampArray** (usage page `0x59`) arayü
 
 - Feature report'lar kendi gerçek uzunluklarında gönderiliyor. Windows normalde hepsini en uzun raporun boyuna (51 byte) dolduruyor.
 - Bağlantı, pil, şarj, mikrofon ve Chroma anahtarı durumu Razer'ın vendor kanalından (usage page `0xFF14`, rapor `0x02`) okunuyor. Kulaklık bu olayları kendiliğinden gönderiyor; uygulama açılışta yalnızca bir kez pil seviyesini soruyor (`0x21`).
+
+### 7.1 sanal surround
+
+Kulaklığın ses cihazı Windows'ta yalnızca stereo olduğu için oyunlar ona 7.1 gönderemez. Razer bunu kendi sanal 7.1 cihazı ve servisiyle çözüyor; bu uygulama da aynı yolu açık parçalarla izliyor:
+
+```
+oyun ─7.1─► CABLE Input ══ VB-CABLE ══► CABLE Output ─► motor ─stereo─► kulaklık
+            (varsayılan cihaz)                          (HeSuVi profili)
+```
+
+- 7.1 açılınca varsayılan ses cihazı **CABLE Input** yapılır; kapanınca ya da uygulamadan çıkınca kulaklığa geri verilir. İletişim cihazına dokunulmaz, sesli sohbet uygulamaları kulaklıkta kalır.
+- Motor, 7.1 sesi HeSuVi profiliyle iki kulağa çevirir. Kanal düzeni ve karıştırma kuralları HeSuVi'nin kaynak kodundan alındı: LFE 111 Hz'de kesilip merkeze eklenir, 7 kanallı profillerde sağ taraf solun aynasıdır. Equalizer APO gerekmez.
+- Gecikme için: 128 örneklik bölümlenmiş FFT konvolüsyonu (2,7 ms), iki kulak tek ters FFT'de; VB-CABLE `IAudioClient3` ile en küçük periyotta okunur; kulaklığa **özel modda** (Windows karıştırıcısını atlayarak) yazılır, olmazsa paylaşımlı moda düşülür. Menüdeki gecikme bu uygulamanın eklediği kısmın tahminidir; oyunun CABLE'a yazarkenki Windows gecikmesi dahil değildir.
+- Profiller `%APPDATA%\BarracudaTray\hrir` klasöründen okunur (HeSuVi 2.0.0.1 kurulum paketinin `hrir` klasörü, yalnızca 48 kHz dosyalar). Profil dosyaları depoya konmaz.
+
+Kurulum: [VB-CABLE](https://vb-audio.com/Cable/)'ı yönetici olarak kurup bilgisayarı yeniden başlatın, sonra Ses ayarları → Kayıttan yürütme → **CABLE Input** → Yapılandır → **7.1 Surround** seçin.
 
 ### Bilinen tuzaklar
 
@@ -47,6 +63,9 @@ BarracudaTray.exe --read 31         # bir feature report'u oku
 BarracudaTray.exe --listen 30       # kulaklığın gönderdiği raporları 30 sn yazdır
 BarracudaTray.exe --poll            # her input report'u bir kez iste
 BarracudaTray.exe --get 21          # vendor özelliği sor (yalnızca 21 ve 2A güvenli)
+BarracudaTray.exe --devices         # ses cihazları ve formatları
+BarracudaTray.exe --selftest razer  # konvolüsyonu bir profile karşı doğrula
+BarracudaTray.exe --surround 10     # 7.1 motorunu 10 sn çalıştır, gecikmeyi yazdır (shared: paylaşımlı mod)
 ```
 
 ## Derleme

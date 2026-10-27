@@ -20,6 +20,9 @@ internal sealed class AppSettings
     public int Brightness { get; set; } = 100;
     public LightingEffect Effect { get; set; } = LightingEffect.Static;
     public bool Autonomous { get; set; }
+    public bool Surround { get; set; }
+    public string SurroundProfile { get; set; } = "razer";
+    public bool SurroundExclusive { get; set; } = true;
 
     public static AppSettings Load()
     {

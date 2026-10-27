@@ -174,6 +174,13 @@ internal static class NativeMethods
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool DestroyIcon(IntPtr icon);
 
+    [DllImport("avrt.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    public static extern IntPtr AvSetMmThreadCharacteristicsW(string taskName, ref uint taskIndex);
+
+    [DllImport("avrt.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool AvRevertMmThreadCharacteristics(IntPtr handle);
+
     public static SafeFileHandle OpenReadWrite(string path, bool overlapped = false) =>
         CreateFileW(path, GenericRead | GenericWrite, FileShareReadWrite, IntPtr.Zero, OpenExisting,
             overlapped ? FileFlagOverlapped : 0, IntPtr.Zero);
