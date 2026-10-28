@@ -10,6 +10,7 @@ if (Test-Path $exe) { & $exe --exit | Out-Null }
 Get-Process BarracudaTray -ErrorAction SilentlyContinue | Stop-Process -Force
 
 Remove-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name BarracudaTray -ErrorAction SilentlyContinue
+Unregister-ScheduledTask -TaskName 'Barracuda Tray' -Confirm:$false -ErrorAction SilentlyContinue
 Remove-Item (Join-Path ([Environment]::GetFolderPath('Programs')) 'Barracuda Tray.lnk') -ErrorAction SilentlyContinue
 Remove-Item $target -Recurse -Force -ErrorAction SilentlyContinue
 

@@ -25,7 +25,15 @@ internal static class AppLog
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                // Logging must never take the app down.
+                // Logging must never take the app down; leave a trace next to the temp files instead.
+                try
+                {
+                    File.AppendAllText(Path.Combine(Path.GetTempPath(), "BarracudaTray-log-error.txt"),
+                        $"{DateTime.Now:HH:mm:ss}  {ex.GetType().Name}: {ex.Message}  ({message}){Environment.NewLine}");
+                }
+                catch (Exception inner) when (inner is IOException or UnauthorizedAccessException)
+                {
+                }
             }
         }
     }

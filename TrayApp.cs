@@ -58,6 +58,8 @@ internal sealed class TrayApp : ApplicationContext
     readonly GlobalHotkeys _hotkeys = new();
     readonly EventWaitHandle _exitRequest = new(false, EventResetMode.AutoReset, Program.ExitEventName);
     readonly RegisteredWaitHandle _exitWait;
+    readonly EventWaitHandle _showRequest = new(false, EventResetMode.AutoReset, Program.ShowEventName);
+    readonly RegisteredWaitHandle _showWait;
     readonly NotifyIcon _tray;
     readonly SynchronizationContext _ui;
 
@@ -170,6 +172,10 @@ internal sealed class TrayApp : ApplicationContext
 
         _exitWait = ThreadPool.RegisterWaitForSingleObject(_exitRequest, (_, _) => _ui.Post(_ => ExitThread(), null),
             null, Timeout.Infinite, executeOnlyOnce: true);
+        _showWait = ThreadPool.RegisterWaitForSingleObject(_showRequest, (_, _) => _ui.Post(_ =>
+                Notify("Barracuda Tray zaten çalışıyor", "Simgesi görev çubuğunun sağındaki ^ okunun altında."), null),
+            null, Timeout.Infinite, executeOnlyOnce: false);
+        StartupRegistration.MigrateFromRunKey();
 
         _engine = new LightingEngine(_settings.ToState());
         _headset.StatusChanged += _ => _ui.Post(_ => OnHeadsetChanged(), null);
@@ -222,6 +228,8 @@ internal sealed class TrayApp : ApplicationContext
         {
             _exitWait.Unregister(null);
             _exitRequest.Dispose();
+            _showWait.Unregister(null);
+            _showRequest.Dispose();
             // Stopped first so handing the default back on exit is not taken for a user's pick.
             _defaultWatcher?.Dispose();
             _hotkeys.Dispose();
@@ -470,7 +478,8 @@ internal sealed class TrayApp : ApplicationContext
         {
             StartupRegistration.Set(!StartupRegistration.IsEnabled);
         }
-        catch (Exception ex) when (ex is UnauthorizedAccessException or System.Security.SecurityException or IOException)
+        catch (Exception ex) when (ex is UnauthorizedAccessException or System.Security.SecurityException or IOException
+            or System.ComponentModel.Win32Exception)
         {
             Notify("Windows ile başlat", ex.Message);
         }

@@ -11,7 +11,7 @@ Razer Barracuda X Chroma için hafif bir Windows tray uygulaması. Razer Synapse
 | .NET 10 Masaüstü Çalışma Zamanı | Microsoft'tan indirilip sessizce kurulur (~60 MB) | Yalnızca eksikse |
 | VB-CABLE | vb-audio.com'dan indirilir, VB-Audio'nun kendi kurulum penceresi açılır; orada **Install Driver**'a basılır | Yalnızca eksikse |
 | 7.1 profilleri | HeSuVi paketi SourceForge'dan indirilir, Windows'un `tar` aracıyla yalnızca `hrir` klasörü çıkarılır | Yalnızca eksikse |
-| Uygulama | `%LOCALAPPDATA%\Programs\BarracudaTray` klasörüne kopyalanır, Başlat menüsüne kısayol eklenir, Windows ile başlaması ayarlanır | Her kurulumda (güncelleme de böyle yapılır) |
+| Uygulama | `%LOCALAPPDATA%\Programs\BarracudaTray` klasörüne kopyalanır, Başlat menüsüne kısayol eklenir, oturum açılınca başlaması için kullanıcıya ait bir Görev Zamanlayıcı görevi ("Barracuda Tray") oluşturulur | Her kurulumda (güncelleme de böyle yapılır) |
 | CABLE Input | 7.1 (8 kanal) yapılır; sürücü yeni kurulduysa yeniden başlatmadan sonra uygulama bunu 7.1 açılınca kendisi yapar | Her kurulumda |
 | Razer yazılımları | Kuruluysa listelenir, istenirse Razer'ın kaldırıcısı açılır | Kuruluysa |
 
@@ -88,6 +88,8 @@ VB-CABLE kurulduğunda Windows onu stereo olarak ayarlıyor. 7.1 açılınca uyg
 - **Kulaklığı doğrudan seçen uygulamalar 7.1'i atlar.** 7.1 açıkken bütün varsayılan roller (iletişim dahil) Barracuda 7.1'e geçer, ama bir uygulamanın kendi ayarında doğrudan "Razer Barracuda X Chroma" seçiliyse sesi 7.1'den geçmeden kulaklığa gider (duyulur ama sanallaştırılmaz). Discord'da Ayarlar → Ses ve Görüntü → **Konuşmacı: Windows Varsayılanı** seçilmeli; mikrofon da Windows Varsayılanı kalmalı. `--sessions 10` hangi uygulamanın hangi cihaza çaldığını gösterir.
 - **"VB-Audio Virtual Cable" asla mikrofon seçilmemeli.** Discord bu cihazı ilk gördüğünde "Sesi VB-Audio Virtual Cable olarak değiştir?" diye sorabilir; pencere X ile kapatılmalı, "Giriş + Çıkışı değiştir" mikrofonu da kabloya çevirir ve karşı taraf sizi duymaz.
 - **Razer uygulamaları arka planda çalışıyorsa** Synapse ışıkları yönetir, Razer'ın 7.1 cihazı da uygulamaları kendine sabitleyebilir. Razer uygulamalarını kaldırın.
+- **Paketlenmiş bir uygulamanın (MSIX, ör. Store'dan kurulan bir terminal ya da IDE) içinden kurmayın veya başlatmayın.** Windows böyle bir paketin `%APPDATA%` ve `HKCU` yazmalarını pakete özel bir klasöre yönlendiriyor: profiller, ayarlar ve başlangıç kaydı oraya gidiyor, Windows'un geri kalanı onları hiç görmüyor (bu yüzden bir ara uygulama açılışta başlamadı ve 7.1 profilleri "yok" sayıldı). Kur.cmd'yi Explorer'dan çalıştırın; bir araçtan çalıştırmak gerekiyorsa bir zamanlanmış görev üzerinden çalıştırın.
+- **Explorer `Run` kaydını atlayabiliyor.** Shell-Core günlüğünde komşu girdiler başlatılırken bu girdi hiç başlatılmadı; ayrıca Run girdileri sırayla, ~30 sn arayla çalışıyor. Bu yüzden başlangıç Görev Zamanlayıcı'ya taşındı.
 - **Windows Dinamik Aydınlatma** bu cihazda açıksa çakışabilir. Ayarlar → Kişiselleştirme → Dinamik Aydınlatma bölümünden kulaklık için kapatın.
 
 ## Kullanım
@@ -100,7 +102,7 @@ Tray simgesine sağ tıklayınca menü açılır, çift tıklamak ışıkları a
 | Ctrl+Alt+S | 7.1'i aç/kapat |
 | Ctrl+Alt+M | Mikrofonu sustur/aç |
 
-Başka bir program aynı kısayolu kullanıyorsa o kısayol menüde görünmez. **Simgeyi değiştir → Resim seç…** ile tray simgesi için kendi resminiz (PNG, ICO, JPG) seçilebilir; resim yalnızca `%APPDATA%\BarracudaTray\icon.png` olarak saklanır, uygulamayla dağıtılmaz. Işık rengi ve bağlantı durumu simgenin köşesinde küçük bir nokta olarak görünür. **Profiller** menüsü ışık, 7.1 ve kulaklık ses ayarlarının (EQ, sidetone) o anki halini adıyla kaydeder. **Windows ile başlat** kullanıcı başına `Run` anahtarını kullanır, yönetici izni gerekmez. Ayarlar `%APPDATA%\BarracudaTray\settings.json` dosyasında saklanır.
+Başka bir program aynı kısayolu kullanıyorsa o kısayol menüde görünmez. **Simgeyi değiştir → Resim seç…** ile tray simgesi için kendi resminiz (PNG, ICO, JPG) seçilebilir; resim yalnızca `%APPDATA%\BarracudaTray\icon.png` olarak saklanır, uygulamayla dağıtılmaz. Işık rengi ve bağlantı durumu simgenin köşesinde küçük bir nokta olarak görünür. **Profiller** menüsü ışık, 7.1 ve kulaklık ses ayarlarının (EQ, sidetone) o anki halini adıyla kaydeder. **Windows ile başlat** kullanıcıya ait bir Görev Zamanlayıcı görevi kullanır (oturum açılınca, normal öncelik, süre sınırı yok, pilde de çalışır), yönetici izni gerekmez; eski sürümlerin `Run` kaydı ilk açılışta göreve çevrilir. Uygulama zaten çalışırken yeniden açılırsa, çalışan kopya "zaten çalışıyor" bildirimi gösterir (simge görev çubuğunun ^ bölümünde olabilir). Ayarlar `%APPDATA%\BarracudaTray\settings.json` dosyasında saklanır; her başlangıç ve yakalanmayan hatalar `log.txt`'ye yazılır.
 
 Test için komut satırı modları:
 
@@ -116,6 +118,7 @@ BarracudaTray.exe --poll            # her input report'u bir kez iste
 BarracudaTray.exe --status          # kulaklık izleyicisinin okuduğu durum ve ayarlar
 BarracudaTray.exe --configure-cable # CABLE Input'u 7.1 yap
 BarracudaTray.exe --exit            # çalışan uygulamayı düzgün kapat
+BarracudaTray.exe --paths [dosya]   # kullanılan klasörler ve log/ayar dosyalarına erişim (dosyaya da yazar)
 BarracudaTray.exe --get 13          # vendor özelliği sor (yalnızca tablodakiler)
 BarracudaTray.exe --set 13 07       # vendor özelliği yaz (yalnızca tablodakiler)
 BarracudaTray.exe --devices         # ses cihazları, formatları ve özel modda desteklenenler

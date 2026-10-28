@@ -40,6 +40,27 @@ internal static class Cli
                     return Get((HeadsetProperty)property);
                 case "--set" when args.Length > 2 && byte.TryParse(args[1], System.Globalization.NumberStyles.HexNumber, null, out var setProperty):
                     return Get((HeadsetProperty)setProperty, Convert.FromHexString(args[2]));
+                case "--paths":
+                    // With a file argument, so it can be checked from places that discard console output.
+                    var paths = string.Join(Environment.NewLine,
+                        $"cwd={Environment.CurrentDirectory}",
+                        $"ApplicationData={Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData)}",
+                        $"env APPDATA={Environment.GetEnvironmentVariable("APPDATA")} USERPROFILE={Environment.GetEnvironmentVariable("USERPROFILE")}",
+                        $"log={AppLog.FilePath}");
+                    try
+                    {
+                        File.AppendAllText(AppLog.FilePath, "");
+                        File.ReadAllText(Path.Combine(Path.GetDirectoryName(AppLog.FilePath)!, "settings.json"));
+                        paths += Environment.NewLine + "log and settings: ok";
+                    }
+                    catch (Exception ex)
+                    {
+                        paths += Environment.NewLine + $"log and settings: {ex.GetType().Name}: {ex.Message}";
+                    }
+                    if (args.Length > 1)
+                        File.WriteAllText(args[1], paths);
+                    Console.WriteLine(paths);
+                    return 0;
                 case "--devices":
                     return Devices();
                 case "--status":

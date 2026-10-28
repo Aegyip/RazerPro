@@ -100,8 +100,18 @@ function Install-User {
         (Join-Path ([Environment]::GetFolderPath('Programs')) 'Barracuda Tray.lnk'))
     $shortcut.TargetPath = $exe
     $shortcut.Save()
-    Set-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name BarracudaTray -Value "`"$exe`""
-    Done "$target klasörüne kuruldu; Windows ile başlayacak."
+    # A per-user logon task rather than the Run key: Explorer skipped the Run entry at logon while
+    # starting its neighbours. Priority 4 is normal (tasks default to below normal); no time limit
+    # (the default stops tasks after 72 h) and no AC-power requirement.
+    Remove-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name BarracudaTray -ErrorAction SilentlyContinue
+    $user = "$env:USERDOMAIN\$env:USERNAME"
+    Register-ScheduledTask -TaskName 'Barracuda Tray' -Force `
+        -Action (New-ScheduledTaskAction -Execute $exe) `
+        -Trigger (New-ScheduledTaskTrigger -AtLogOn -User $user) `
+        -Principal (New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Limited) `
+        -Settings (New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+            -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew -Priority 4) | Out-Null
+    Done "$target klasörüne kuruldu; oturum açılınca kendiliğinden başlayacak."
 
     # Piped so PowerShell waits for the GUI-subsystem exe. Fails harmlessly right after a fresh
     # VB-CABLE install; the app switches CABLE Input to 7.1 itself once 7.1 is turned on.
